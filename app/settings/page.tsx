@@ -1,269 +1,254 @@
-import { Button } from '@/components/ui/Button'
-import { Bell, Bot, Globe, Lock, Save, Zap, Clock } from 'lucide-react'
+'use client'
 
-function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
+import { useState } from 'react'
+import { cn } from '@/lib/helpers/cn'
+import { Button } from '@/components/ui/Button'
+import {
+  Settings, Bot, Shield, Bell, Clock, Globe, Download,
+  Sun, Moon, Lock, Key, Database, AlertTriangle, CheckCircle2,
+} from 'lucide-react'
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
-    <div className="flex items-start justify-between gap-6 py-4 border-b border-slate-100 last:border-0">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800">{label}</p>
-        {description && <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{description}</p>}
+    <button
+      role="switch" aria-checked={checked} onClick={onChange}
+      className={cn(
+        'relative inline-flex w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900',
+        checked ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'
+      )}
+    >
+      <span className={cn(
+        'absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200',
+        checked ? 'translate-x-5' : 'translate-x-0'
+      )} />
+    </button>
+  )
+}
+
+function SectionCard({ icon: Icon, title, desc, children }: {
+  icon: typeof Settings; title: string; desc: string; children: React.ReactNode
+}) {
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
+        <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
+          <Icon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{desc}</p>
+        </div>
+      </div>
+      <div className="px-5 py-4 space-y-4">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function SettingRow({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1">
+      <div>
+        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">{label}</p>
+        {desc && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{desc}</p>}
       </div>
       <div className="flex-shrink-0">{children}</div>
     </div>
   )
 }
 
-function Toggle({ defaultChecked = false }: { defaultChecked?: boolean }) {
+function InputField({ label, value, type = 'text' }: { label: string; value: string; type?: string }) {
+  const [val, setVal] = useState(value)
   return (
-    <div className={`relative w-11 h-6 rounded-full cursor-pointer transition-colors ${defaultChecked ? 'bg-blue-600' : 'bg-slate-200'}`}>
-      <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${defaultChecked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+    <div>
+      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">{label}</label>
+      <input
+        type={type} value={val} onChange={e => setVal(e.target.value)}
+        className="w-full text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
     </div>
   )
 }
 
-function SectionHeader({ icon: Icon, title, description }: { icon: typeof Bell; title: string; description: string }) {
+function SelectField({ label, value, options }: { label: string; value: string; options: string[] }) {
+  const [val, setVal] = useState(value)
   return (
-    <div className="flex items-center gap-3 mb-1">
-      <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
-        <Icon className="w-4.5 h-4.5 text-slate-600" />
-      </div>
-      <div>
-        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-        <p className="text-xs text-slate-500">{description}</p>
-      </div>
+    <div>
+      <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">{label}</label>
+      <select
+        value={val} onChange={e => setVal(e.target.value)}
+        className="w-full text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        {options.map(o => <option key={o}>{o}</option>)}
+      </select>
     </div>
   )
 }
 
 export default function SettingsPage() {
+  const [toggles, setToggles] = useState({
+    maintenanceMode: false, debugLogs: false, autoRestart: true,
+    proxyRotation: true, captchaFallback: true, headless: true,
+    twoFactor: false, ipWhitelist: false,
+    emailNotifs: true, slotAlert: true, errorAlert: true,
+  })
+
+  const toggle = (k: keyof typeof toggles) =>
+    setToggles(prev => ({ ...prev, [k]: !prev[k] }))
+
+  const [saved, setSaved] = useState(false)
+  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2500) }
+
   return (
-    <div className="space-y-6 max-w-3xl">
-      {/* Genel Ayarlar */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Zap} title="Genel Ayarlar" description="Sistem genelinde geçerli temel yapılandırma" />
-        <div className="mt-4">
-          <SettingRow
-            label="Sistem Adı"
-            description="Panelde görünen sistem başlığı"
-          >
-            <input
-              defaultValue="Vize Randevu Sistemi"
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-56"
-              readOnly
+    <div className="space-y-6 max-w-4xl">
+
+      {/* Kayıt bandı */}
+      {saved && (
+        <div className="bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+          <p className="text-sm text-emerald-700 dark:text-emerald-400 font-medium">Ayarlar başarıyla kaydedildi.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+        {/* Genel Ayarlar */}
+        <SectionCard icon={Settings} title="Genel Ayarlar" desc="Temel sistem yapılandırması">
+          <InputField label="Sistem Adı" value="Vize Randevu Paneli" />
+          <InputField label="Yönetici E-posta" value="admin@vizerandevu.com" type="email" />
+          <SettingRow label="Bakım Modu" desc="Sistemi geçici olarak kapat">
+            <Toggle checked={toggles.maintenanceMode} onChange={() => toggle('maintenanceMode')} />
+          </SettingRow>
+          <SettingRow label="Hata Ayıklama Logları" desc="Detaylı sistem loglarını etkinleştir">
+            <Toggle checked={toggles.debugLogs} onChange={() => toggle('debugLogs')} />
+          </SettingRow>
+        </SectionCard>
+
+        {/* Bot Ayarları */}
+        <SectionCard icon={Bot} title="Bot Ayarları" desc="VFS bot davranış parametreleri">
+          <InputField label="Varsayılan Tarama Aralığı (sn)" value="45" type="number" />
+          <InputField label="Maks. Günlük Deneme" value="2500" type="number" />
+          <SettingRow label="Otomatik Yeniden Başlatma" desc="Hata sonrası botu otomatik başlat">
+            <Toggle checked={toggles.autoRestart} onChange={() => toggle('autoRestart')} />
+          </SettingRow>
+          <SettingRow label="Headless Mod" desc="Tarayıcıyı arka planda çalıştır">
+            <Toggle checked={toggles.headless} onChange={() => toggle('headless')} />
+          </SettingRow>
+        </SectionCard>
+
+        {/* Proxy Ayarları */}
+        <SectionCard icon={Shield} title="Proxy Ayarları" desc="IP havuzu ve rotasyon ayarları">
+          <SelectField label="Proxy Sağlayıcı" value="BrightData" options={['BrightData', 'Oxylabs', 'Smartproxy', 'Manuel']} />
+          <InputField label="Maks. Ping Eşiği (ms)" value="500" type="number" />
+          <SettingRow label="Otomatik Rotasyon" desc="Yavaş proxy'yi otomatik değiştir">
+            <Toggle checked={toggles.proxyRotation} onChange={() => toggle('proxyRotation')} />
+          </SettingRow>
+          <SettingRow label="CAPTCHA Sonrası Değiştir" desc="CAPTCHA alındıktan sonra IP değiştir">
+            <Toggle checked={toggles.captchaFallback} onChange={() => toggle('captchaFallback')} />
+          </SettingRow>
+        </SectionCard>
+
+        {/* Bildirim Ayarları */}
+        <SectionCard icon={Bell} title="Bildirim Ayarları" desc="Uyarı ve bildirim tercihleri">
+          <SettingRow label="E-posta Bildirimleri" desc="Kritik olaylar için e-posta gönder">
+            <Toggle checked={toggles.emailNotifs} onChange={() => toggle('emailNotifs')} />
+          </SettingRow>
+          <SettingRow label="Slot Bulundu Uyarısı" desc="Yeni randevu slotu bulunduğunda">
+            <Toggle checked={toggles.slotAlert} onChange={() => toggle('slotAlert')} />
+          </SettingRow>
+          <SettingRow label="Hata Uyarısı" desc="Bot veya proxy hatalarında bildirim">
+            <Toggle checked={toggles.errorAlert} onChange={() => toggle('errorAlert')} />
+          </SettingRow>
+          <InputField label="Bildirim E-posta Adresi" value="alerts@vizerandevu.com" type="email" />
+        </SectionCard>
+
+        {/* Güvenlik */}
+        <SectionCard icon={Lock} title="Güvenlik" desc="Kimlik doğrulama ve erişim kontrolü">
+          <SettingRow label="İki Faktörlü Doğrulama" desc="Admin hesapları için 2FA zorunlu kıl">
+            <Toggle checked={toggles.twoFactor} onChange={() => toggle('twoFactor')} />
+          </SettingRow>
+          <SettingRow label="IP Kısıtlaması" desc="Yalnızca izin verilen IP'lerden erişime izin ver">
+            <Toggle checked={toggles.ipWhitelist} onChange={() => toggle('ipWhitelist')} />
+          </SettingRow>
+          <div>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">İzin Verilen IP'ler</label>
+            <textarea
+              rows={3}
+              defaultValue="192.168.1.0/24&#10;10.0.0.1"
+              disabled={!toggles.ipWhitelist}
+              className="w-full text-xs font-mono border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             />
-          </SettingRow>
-          <SettingRow
-            label="Zaman Dilimi"
-            description="Tüm zaman damgaları bu dilime göre gösterilir"
-          >
-            <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-48">
-              <option>Europe/Istanbul (UTC+3)</option>
-              <option>UTC</option>
-            </select>
-          </SettingRow>
-          <SettingRow
-            label="Dil"
-            description="Arayüz dili"
-          >
-            <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-48">
-              <option>Türkçe</option>
-              <option>English</option>
-            </select>
-          </SettingRow>
-        </div>
-      </div>
+          </div>
+          <Button variant="outline" size="sm">
+            <Key className="w-3 h-3" />API Anahtarlarını Yönet
+          </Button>
+        </SectionCard>
 
-      {/* Bot Ayarları */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Bot} title="Bot Ayarları" description="Otomasyon botlarının davranış parametreleri" />
-        <div className="mt-4">
-          <SettingRow
-            label="Tarama Aralığı"
-            description="Her bot iterasyonu arasındaki bekleme süresi (saniye)"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                defaultValue={45}
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 text-center"
-                readOnly
-              />
-              <span className="text-xs text-slate-500">saniye</span>
-            </div>
-          </SettingRow>
-          <SettingRow
-            label="Maksimum Yeniden Deneme"
-            description="Hata durumunda bağlantı yeniden deneme sayısı"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                defaultValue={5}
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 text-center"
-                readOnly
-              />
-              <span className="text-xs text-slate-500">deneme</span>
-            </div>
-          </SettingRow>
-          <SettingRow
-            label="Çalışma Saatleri"
-            description="Botların aktif olacağı zaman aralığı"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="time"
-                defaultValue="07:00"
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                readOnly
-              />
-              <span className="text-xs text-slate-400">—</span>
-              <input
-                type="time"
-                defaultValue="23:00"
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                readOnly
-              />
-            </div>
-          </SettingRow>
-          <SettingRow
-            label="Otomatik Yeniden Başlatma"
-            description="Hata durumunda botu otomatik olarak yeniden başlat"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-          <SettingRow
-            label="Ekran Görüntüsü Al"
-            description="Her işlem sonrası ekran görüntüsü kaydet"
-          >
-            <Toggle defaultChecked={false} />
-          </SettingRow>
-        </div>
-      </div>
-
-      {/* Bildirim Ayarları */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Bell} title="Bildirimler" description="Randevu bulunduğunda ve sistem olaylarında uyarı al" />
-        <div className="mt-4">
-          <SettingRow
-            label="Telegram Bildirimleri"
-            description="Randevu bulunduğunda Telegram mesajı gönder"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-          <SettingRow
-            label="Telegram Bot Token"
-            description=""
-          >
-            <input
-              type="password"
-              defaultValue="••••••••••••••••••••"
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-56 font-mono"
-              readOnly
+        {/* Oturum & Tema */}
+        <div className="space-y-5">
+          <SectionCard icon={Clock} title="Oturum Süresi" desc="Otomatik oturum kapatma ayarları">
+            <SelectField
+              label="Oturum Zaman Aşımı"
+              value="8 saat"
+              options={['30 dakika', '1 saat', '4 saat', '8 saat', '24 saat', 'Sınırsız']}
             />
-          </SettingRow>
-          <SettingRow
-            label="E-posta Bildirimleri"
-            description="Kritik hatalar için e-posta bildirimi al"
-          >
-            <Toggle defaultChecked={false} />
-          </SettingRow>
-          <SettingRow
-            label="Ses Bildirimi"
-            description="Randevu bulunduğunda tarayıcıda ses çıkar"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-        </div>
-      </div>
+            <SettingRow label="Hareketsizlik Tespiti" desc="Kullanıcı hareketsizse otomatik çıkış">
+              <Toggle checked={true} onChange={() => {}} />
+            </SettingRow>
+          </SectionCard>
 
-      {/* Proxy & Güvenlik */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Globe} title="Proxy Ayarları" description="IP rotasyonu ve bağlantı yapılandırması" />
-        <div className="mt-4">
-          <SettingRow
-            label="Proxy Rotasyonu"
-            description="Her oturumda farklı proxy IP adresi kullan"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-          <SettingRow
-            label="Proxy Sağlayıcı"
-            description="Kullanılacak proxy servisi"
-          >
-            <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-48">
-              <option>BrightData</option>
-              <option>Oxylabs</option>
-              <option>Özel Proxy</option>
-            </select>
-          </SettingRow>
-          <SettingRow
-            label="User-Agent Rotasyonu"
-            description="Her istekte farklı tarayıcı kimliği kullan"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-        </div>
-      </div>
-
-      {/* Güvenlik */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Lock} title="Güvenlik" description="Şifreleme ve erişim kontrol ayarları" />
-        <div className="mt-4">
-          <SettingRow
-            label="İki Faktörlü Doğrulama"
-            description="Admin girişinde 2FA kullan"
-          >
-            <Toggle defaultChecked={true} />
-          </SettingRow>
-          <SettingRow
-            label="Oturum Zaman Aşımı"
-            description="Hareketsizlik sonrası otomatik çıkış süresi"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                defaultValue={60}
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 text-center"
-                readOnly
-              />
-              <span className="text-xs text-slate-500">dakika</span>
+          <SectionCard icon={Sun} title="Tema & Dil" desc="Görünüm ve lokalizasyon tercihleri">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border-2 border-blue-500 rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer">
+                <Sun className="w-5 h-5 text-amber-500" />
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Açık</span>
+              </div>
+              <div className="border-2 border-slate-200 dark:border-slate-700 rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer hover:border-slate-400 dark:hover:border-slate-500 transition-colors">
+                <Moon className="w-5 h-5 text-slate-500" />
+                <span className="text-xs font-medium text-slate-500">Koyu</span>
+              </div>
             </div>
-          </SettingRow>
+            <SelectField label="Dil" value="Türkçe" options={['Türkçe', 'English', 'Deutsch', 'Français']} />
+            <SelectField label="Zaman Dilimi" value="UTC+3 (İstanbul)" options={['UTC+0', 'UTC+1', 'UTC+2', 'UTC+3 (İstanbul)']} />
+          </SectionCard>
         </div>
       </div>
 
-      {/* Log Ayarları */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SectionHeader icon={Clock} title="Log Yönetimi" description="Sistem kayıtlarının saklanma ve temizlenme politikası" />
-        <div className="mt-4">
-          <SettingRow
-            label="Log Saklama Süresi"
-            description="Kayıtların silinmeden önce tutulacağı süre"
-          >
-            <div className="flex items-center gap-2">
-              <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option>30 gün</option>
-                <option>60 gün</option>
-                <option>90 gün</option>
-              </select>
+      {/* Yedekleme */}
+      <SectionCard icon={Database} title="Yedekleme & Geri Yükleme" desc="Sistem verisi yedekleme ve geri yükleme işlemleri">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            { label: 'Son Tam Yedek',   value: '22 Haz 2026 03:00', icon: Database },
+            { label: 'Yedek Boyutu',    value: '142 MB',            icon: Download },
+            { label: 'Otomatik Yedek',  value: 'Her Gece 03:00',    icon: Clock    },
+          ].map(item => (
+            <div key={item.label} className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 flex items-center gap-3">
+              <item.icon className="w-4 h-4 text-slate-500 dark:text-slate-400 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{item.label}</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-0.5">{item.value}</p>
+              </div>
             </div>
-          </SettingRow>
-          <SettingRow
-            label="Detaylı Loglama"
-            description="HTTP istekleri ve yanıtları kaydet (daha fazla disk alanı kullanır)"
-          >
-            <Toggle defaultChecked={false} />
-          </SettingRow>
+          ))}
         </div>
-      </div>
+        <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <Button variant="secondary" size="sm"><Download className="w-3 h-3" />Manuel Yedek Al</Button>
+          <Button variant="outline" size="sm"><Database className="w-3 h-3" />Geri Yükle</Button>
+          <div className="ml-auto flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Geri yükleme mevcut verilerin üzerine yazar.
+          </div>
+        </div>
+      </SectionCard>
 
-      {/* Kaydet */}
-      <div className="flex justify-end gap-3">
-        <Button variant="outline">Sıfırla</Button>
-        <Button>
-          <Save className="w-4 h-4" />
-          Ayarları Kaydet
-        </Button>
+      {/* Kaydet butonu */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-slate-400 dark:text-slate-500">Son güncelleme: 22 Haz 2026 — 21:15</p>
+        <div className="flex gap-3">
+          <Button variant="outline">Sıfırla</Button>
+          <Button onClick={handleSave}>Tüm Ayarları Kaydet</Button>
+        </div>
       </div>
     </div>
   )
