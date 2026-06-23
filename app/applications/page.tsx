@@ -19,7 +19,7 @@ interface Application {
 const MOCK_APPLICATIONS: Application[] = [
   {
     id: 1,
-    applicantName: 'Mustafa Öner',
+    applicantName: 'Seda Özer',
     passportNo: 'A1234567',
     country: 'İtalya',
     countryEmoji: '🇮🇹',

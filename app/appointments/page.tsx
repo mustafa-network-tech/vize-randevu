@@ -19,7 +19,7 @@ interface Appointment {
 const MOCK_APPOINTMENTS: Appointment[] = [
   {
     id: 1,
-    applicantName: 'Mustafa Öner',
+    applicantName: 'Seda Özer',
     country: 'İtalya',
     countryEmoji: '🇮🇹',
     city: 'Roma',

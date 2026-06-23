@@ -8,7 +8,7 @@ const MOCK_LOGS: LogEntry[] = [
   { id: 2, timestamp: '22:41:05', level: 'info', bot: 'Hollanda Bot #1', country: 'Hollanda', message: 'Oturum yenilendi, Amsterdam taraması devam ediyor' },
   { id: 3, timestamp: '22:38:47', level: 'error', bot: 'Almanya Bot #1', country: 'Almanya', message: 'Bağlantı zaman aşımı: VFS Germany sunucusu 30 saniyedir yanıt vermiyor' },
   { id: 4, timestamp: '22:38:02', level: 'warning', bot: 'Almanya Bot #1', country: 'Almanya', message: 'VFS Germany yavaş yanıt veriyor, yeniden deneniyor (3/5)' },
-  { id: 5, timestamp: '22:35:20', level: 'success', bot: 'İtalya Bot #1', country: 'İtalya', message: 'Roma ofisinde 18 Temmuz 09:30 randevusu alındı - Mustafa Öner' },
+  { id: 5, timestamp: '22:35:20', level: 'success', bot: 'İtalya Bot #1', country: 'İtalya', message: 'Roma ofisinde 18 Temmuz 09:30 randevusu alındı - Seda Özer' },
   { id: 6, timestamp: '22:30:11', level: 'warning', bot: 'İtalya Bot #1', country: 'İtalya', message: 'Rate limit yaklaşıyor, 60 saniye bekleniyor' },
   { id: 7, timestamp: '22:28:44', level: 'info', bot: 'İtalya Bot #2', country: 'İtalya', message: 'Milano sayfası yüklendi, müsait slotlar kontrol ediliyor' },
   { id: 8, timestamp: '22:25:33', level: 'info', bot: 'Hollanda Bot #1', country: 'Hollanda', message: 'Oturum başlatıldı, proxy IP: 185.220.101.xx' },

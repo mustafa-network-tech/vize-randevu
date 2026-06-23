@@ -103,7 +103,7 @@ const MOCK_BOTS: BotData[] = [
 ]
 
 const MOCK_APPOINTMENTS = [
-  { id: 1, applicant: 'Mustafa Öner', country: '🇮🇹 İtalya', date: '18 Temmuz 2026', type: 'Schengen', status: 'found' as const },
+  { id: 1, applicant: 'Seda Özer', country: '🇮🇹 İtalya', date: '18 Temmuz 2026', type: 'Schengen', status: 'found' as const },
   { id: 2, applicant: 'Akif Can', country: '🇮🇹 İtalya', date: '22 Temmuz 2026', type: 'Schengen', status: 'booked' as const },
   { id: 3, applicant: 'Selma İdiz', country: '🇳🇱 Hollanda', date: '25 Temmuz 2026', type: 'Schengen', status: 'found' as const },
   { id: 4, applicant: 'Yeliz Özsoy', country: '🇮🇹 İtalya', date: '01 Ağustos 2026', type: 'Schengen', status: 'booked' as const },
