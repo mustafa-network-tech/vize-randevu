@@ -1,224 +1,156 @@
 'use client'
 
-import { useState } from 'react'
-import { cn } from '@/lib/helpers/cn'
+import { useEffect, useState, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Bell, CheckCircle2, Settings, Send, TestTube } from 'lucide-react'
+import { cn } from '@/lib/helpers/cn'
+import { Bell, BellOff, CheckCheck, RefreshCw, Database, Clock } from 'lucide-react'
 
-/* ── Veri yapıları ────────────────────────────────────────── */
-
-interface Channel {
+type Notification = {
   id: string
-  name: string
-  icon: string
-  color: string
-  enabled: boolean
-  configured: boolean
-  configLabel: string
-  configValue: string
-  lastSent: string | null
-  sentCount: number
+  user_id: string
+  type: string
+  title: string
+  message: string
+  is_read: boolean
+  created_at: string
 }
 
-interface NotifType {
-  id: string
-  label: string
-  description: string
-  icon: string
-  severity: 'success' | 'warning' | 'error' | 'info'
+const TYPE_COLORS: Record<string, string> = {
+  success:  'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400',
+  warning:  'bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400',
+  error:    'bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400',
+  info:     'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400',
+  appointment: 'bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400',
 }
-
-const CHANNELS_INIT: Channel[] = [
-  { id: 'telegram',  name: 'Telegram',  icon: '✈️', color: 'bg-sky-50 dark:bg-sky-950 border-sky-200 dark:border-sky-800',        enabled: true,  configured: true,  configLabel: 'Bot Token',   configValue: '7312••••••••:AAH••••••••••••••',  lastSent: '5 dk önce',   sentCount: 247 },
-  { id: 'whatsapp',  name: 'WhatsApp',  icon: '💬', color: 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800', enabled: true,  configured: true,  configLabel: 'Numara',      configValue: '+90 5•• ••• ••••',                lastSent: '22 dk önce',  sentCount: 89  },
-  { id: 'email',     name: 'E-posta',   icon: '📧', color: 'bg-violet-50 dark:bg-violet-950 border-violet-200 dark:border-violet-800',enabled: false, configured: true,  configLabel: 'SMTP Host',   configValue: 'smtp.gmail.com:587',               lastSent: null,          sentCount: 12  },
-  { id: 'discord',   name: 'Discord',   icon: '🎮', color: 'bg-indigo-50 dark:bg-indigo-950 border-indigo-200 dark:border-indigo-800',enabled: true, configured: true,  configLabel: 'Webhook URL', configValue: 'https://discord.com/api/webhooks/••••',lastSent: '1 sa önce',sentCount: 134 },
-]
-
-const NOTIF_TYPES: NotifType[] = [
-  { id: 'slot_found',     label: 'Slot Bulundu',       description: 'Müsait randevu slotu tespit edildiğinde',  icon: '📅', severity: 'success' },
-  { id: 'captcha',        label: 'CAPTCHA Oluştu',      description: 'Bot bir CAPTCHA ile karşılaştığında',       icon: '🔐', severity: 'warning' },
-  { id: 'bot_stopped',    label: 'Bot Durdu',           description: 'Bir bot hata veya durdurma ile kapandığında',icon: '🛑', severity: 'error'   },
-  { id: 'proxy_changed',  label: 'Proxy Değişti',       description: 'Otomatik proxy rotasyonu gerçekleştiğinde', icon: '🔄', severity: 'info'    },
-  { id: 'account_locked', label: 'Hesap Kilitlendi',    description: 'VFS hesabı kilitlendiğinde',               icon: '🔒', severity: 'error'   },
-  { id: 'appointment_booked', label: 'Randevu Alındı',  description: 'Randevu başarıyla rezerve edildiğinde',    icon: '✅', severity: 'success' },
-]
-
-/* ── Toggle bileşeni ──────────────────────────────────────── */
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={onChange}
-      className={cn(
-        'relative inline-flex w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900',
-        checked ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'
-      )}
-    >
-      <span className={cn(
-        'absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200',
-        checked ? 'translate-x-5' : 'translate-x-0'
-      )} />
-    </button>
-  )
-}
-
-/* ── Sayfa ─────────────────────────────────────────────────── */
 
 export default function NotificationsPage() {
-  const [channels, setChannels] = useState(CHANNELS_INIT)
-  const [channelNotifs, setChannelNotifs] = useState<Record<string, Record<string, boolean>>>(() => {
-    const init: Record<string, Record<string, boolean>> = {}
-    CHANNELS_INIT.forEach(ch => {
-      init[ch.id] = {
-        slot_found: true, captcha: true, bot_stopped: true,
-        proxy_changed: false, account_locked: true, appointment_booked: true,
-      }
-    })
-    return init
-  })
+  const [notifs,     setNotifs]     = useState<Notification[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [filter,     setFilter]     = useState<'all' | 'unread'>('all')
+  const [refreshing, setRefreshing] = useState(false)
 
-  const toggleChannel = (id: string) =>
-    setChannels(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c))
+  const fetchNotifs = useCallback(async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    setNotifs((data ?? []) as Notification[])
+    setLoading(false)
+    setRefreshing(false)
+  }, [])
 
-  const toggleNotif = (chId: string, nId: string) =>
-    setChannelNotifs(prev => ({
-      ...prev,
-      [chId]: { ...prev[chId], [nId]: !prev[chId][nId] },
-    }))
+  useEffect(() => { fetchNotifs() }, [fetchNotifs])
 
-  const enabledChannels = channels.filter(c => c.enabled).length
-  const totalSent = channels.reduce((s, c) => s + c.sentCount, 0)
+  const markRead = async (id: string) => {
+    const supabase = createClient()
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id)
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
+  }
+
+  const markAllRead = async () => {
+    const supabase = createClient()
+    await supabase.from('notifications').update({ is_read: true }).eq('is_read', false)
+    setNotifs(prev => prev.map(n => ({ ...n, is_read: true })))
+  }
+
+  const unreadCount = notifs.filter(n => !n.is_read).length
+  const filtered = filter === 'unread' ? notifs.filter(n => !n.is_read) : notifs
+
+  if (loading) return <div className="h-64 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse" />
 
   return (
     <div className="space-y-6">
-
-      {/* Özet */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* KPI */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[
-          { label: 'Aktif Kanal',      value: enabledChannels,     color: 'text-blue-600 bg-blue-50 dark:bg-blue-950'         },
-          { label: 'Toplam Gönderilen',value: totalSent,           color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950' },
-          { label: 'Bildirim Türü',    value: NOTIF_TYPES.length,  color: 'text-violet-600 bg-violet-50 dark:bg-violet-950'    },
-          { label: 'Bugün Gönderilen', value: 34,                  color: 'text-amber-600 bg-amber-50 dark:bg-amber-950'       },
+          { label: 'Toplam',       value: notifs.length,          color: 'text-slate-700 dark:text-slate-300' },
+          { label: 'Okunmamış',    value: unreadCount,            color: 'text-blue-600 dark:text-blue-400'   },
+          { label: 'Okundu',       value: notifs.length - unreadCount, color: 'text-emerald-600 dark:text-emerald-400' },
         ].map(item => (
           <div key={item.label} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
-            <p className={cn('text-2xl font-bold', item.color.split(' ')[0])}>{item.value}</p>
+            <p className={cn('text-2xl font-bold', item.color)}>{item.value}</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{item.label}</p>
           </div>
         ))}
       </div>
 
-      {/* Kanal kartları */}
-      <div>
-        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Bildirim Kanalları</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {channels.map(ch => (
-            <div key={ch.id} className={cn(
-              'bg-white dark:bg-slate-900 rounded-xl border shadow-sm p-5 transition-all',
-              ch.color,
-              !ch.enabled && 'opacity-60'
-            )}>
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-xl flex items-center justify-center text-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-                    {ch.icon}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-800 dark:text-slate-100">{ch.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                      {ch.lastSent ? `Son gönderim: ${ch.lastSent}` : 'Henüz gönderilmedi'}
-                    </p>
-                  </div>
-                </div>
-                <Toggle checked={ch.enabled} onChange={() => toggleChannel(ch.id)} />
-              </div>
-
-              <div className="bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2 mb-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{ch.configLabel}</p>
-                  <p className="text-xs font-mono font-medium text-slate-700 dark:text-slate-300 mt-0.5">{ch.configValue}</p>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                  <Send className="w-3 h-3" />
-                  {ch.sentCount}
-                </div>
-              </div>
-
-              {/* Aktif bildirim türleri */}
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {NOTIF_TYPES.filter(n => channelNotifs[ch.id]?.[n.id]).map(n => (
-                  <span key={n.id} className="text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-full text-slate-600 dark:text-slate-300">
-                    {n.icon} {n.label}
-                  </span>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <Button variant="ghost" size="sm" className="flex-1">
-                  <TestTube className="w-3 h-3" />Test Gönder
-                </Button>
-                <Button variant="outline" size="sm">
-                  <Settings className="w-3 h-3" />Yapılandır
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Bildirim türleri x kanal matrisi */}
+      {/* Bildirimler */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Bildirim Matrisi</h3>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Her kanal için hangi olayların bildirim göndereceğini yapılandır</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-slate-800">
-                <th className="text-left text-xs font-semibold text-slate-500 dark:text-slate-400 py-3 px-5 min-w-[220px]">Bildirim Türü</th>
-                {channels.map(ch => (
-                  <th key={ch.id} className="text-center text-xs font-semibold text-slate-500 dark:text-slate-400 py-3 px-4 whitespace-nowrap">
-                    {ch.icon} {ch.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-              {NOTIF_TYPES.map(notif => (
-                <tr key={notif.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="py-3.5 px-5">
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-base">{notif.icon}</span>
-                      <div>
-                        <p className="text-sm font-medium text-slate-800 dark:text-slate-200">{notif.label}</p>
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{notif.description}</p>
-                      </div>
-                    </div>
-                  </td>
-                  {channels.map(ch => (
-                    <td key={ch.id} className="py-3.5 px-4 text-center">
-                      <Toggle
-                        checked={channelNotifs[ch.id]?.[notif.id] ?? false}
-                        onChange={() => toggleNotif(ch.id, notif.id)}
-                      />
-                    </td>
-                  ))}
-                </tr>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Bildirimler</h3>
+            <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 text-xs">
+              {(['all', 'unread'] as const).map(f => (
+                <button key={f} onClick={() => setFilter(f)} className={cn('px-3 py-1 rounded-md font-medium transition-colors',
+                  filter === f ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400'
+                )}>
+                  {f === 'all' ? 'Tümü' : `Okunmamış (${unreadCount})`}
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <p className="text-xs text-slate-400 dark:text-slate-500">Değişiklikler otomatik kaydedilir</p>
-          <div className="flex items-center gap-1.5 text-xs text-emerald-600">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span className="font-medium">Kaydedildi</span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {unreadCount > 0 && (
+              <Button variant="secondary" size="sm" onClick={markAllRead}>
+                <CheckCheck className="w-3 h-3" />Tümünü Okundu İşaretle
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => fetchNotifs(true)} disabled={refreshing}>
+              <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />Yenile
+            </Button>
           </div>
         </div>
+
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            {notifs.length === 0 ? (
+              <><Database className="w-10 h-10 text-slate-300 dark:text-slate-600" /><p className="text-sm text-slate-500 dark:text-slate-400">Henüz bildirim yok.</p></>
+            ) : (
+              <><BellOff className="w-10 h-10 text-slate-300 dark:text-slate-600" /><p className="text-sm text-slate-500 dark:text-slate-400">Tüm bildirimler okundu.</p></>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50 dark:divide-slate-800">
+            {filtered.map(notif => (
+              <div key={notif.id} className={cn(
+                'px-5 py-4 flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors',
+                !notif.is_read && 'bg-blue-50/30 dark:bg-blue-950/10'
+              )}>
+                <div className={cn('w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5',
+                  TYPE_COLORS[notif.type] ?? TYPE_COLORS.info
+                )}>
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className={cn('text-sm font-semibold', !notif.is_read ? 'text-slate-800 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300')}>
+                        {notif.title}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{notif.message}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {!notif.is_read && (
+                        <button onClick={() => markRead(notif.id)} className="text-xs text-blue-500 hover:underline whitespace-nowrap">Okundu</button>
+                      )}
+                      <Badge variant={notif.is_read ? 'default' : 'info'} dot={!notif.is_read}>
+                        {notif.is_read ? 'Okundu' : 'Yeni'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />{new Date(notif.created_at).toLocaleString('tr-TR')}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

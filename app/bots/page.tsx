@@ -1,370 +1,244 @@
-import { BotStatusCard, BotData } from '@/components/bots/BotStatusCard'
+'use client'
+
+import { useEffect, useState, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import {
-  Play, Square, RefreshCw, Plus, Activity,
-  Wifi, WifiOff, Clock, Target, TrendingUp, CalendarCheck
-} from 'lucide-react'
 import { cn } from '@/lib/helpers/cn'
+import { Plus, Play, Square, RefreshCw, Database, Clock, X, Loader2, Zap } from 'lucide-react'
 
-/* ── Mock veriler ─────────────────────────────────────────── */
-
-const MOCK_BOTS: BotData[] = [
-  {
-    id: 1,
-    name: 'İtalya Bot #1',
-    country: 'İtalya',
-    countryEmoji: '🇮🇹',
-    status: 'running',
-    lastActivity: '2 dk önce',
-    todayAttempts: 145,
-    todayFound: 3,
-    successRate: 82,
-    currentTask: 'Roma — Schengen vizesi kontrol ediliyor',
-  },
-  {
-    id: 2,
-    name: 'İtalya Bot #2',
-    country: 'İtalya',
-    countryEmoji: '🇮🇹',
-    status: 'running',
-    lastActivity: '1 dk önce',
-    todayAttempts: 201,
-    todayFound: 5,
-    successRate: 87,
-    currentTask: 'Milano — 15 Ağustos slotları taranıyor',
-  },
-  {
-    id: 3,
-    name: 'Hollanda Bot #1',
-    country: 'Hollanda',
-    countryEmoji: '🇳🇱',
-    status: 'running',
-    lastActivity: '5 dk önce',
-    todayAttempts: 89,
-    todayFound: 1,
-    successRate: 74,
-    currentTask: 'Amsterdam — Müsait slot aranıyor',
-  },
-  {
-    id: 4,
-    name: 'Almanya Bot #1',
-    country: 'Almanya',
-    countryEmoji: '🇩🇪',
-    status: 'error',
-    lastActivity: '23 dk önce',
-    todayAttempts: 34,
-    todayFound: 0,
-    successRate: 0,
-  },
-  {
-    id: 5,
-    name: 'Fransa Bot #1',
-    country: 'Fransa',
-    countryEmoji: '🇫🇷',
-    status: 'stopped',
-    lastActivity: '1 sa önce',
-    todayAttempts: 0,
-    todayFound: 0,
-    successRate: 0,
-  },
-  {
-    id: 6,
-    name: 'Hollanda Bot #2',
-    country: 'Hollanda',
-    countryEmoji: '🇳🇱',
-    status: 'idle',
-    lastActivity: '10 dk önce',
-    todayAttempts: 12,
-    todayFound: 0,
-    successRate: 45,
-  },
-]
-
-// Konfigürasyon detayları (BotData'ya eklenemediği için ayrı tutuyoruz)
-const BOT_CONFIG: Record<number, {
-  proxy: string
-  interval: number
-  cities: string[]
-  dailyTarget: number
-  uptime: string
-  lastSuccess?: string
-}> = {
-  1: { proxy: 'BrightData TR-01', interval: 45, cities: ['Roma', 'Floransa'],   dailyTarget: 200, uptime: '14s 23dk', lastSuccess: '22:35' },
-  2: { proxy: 'BrightData TR-02', interval: 38, cities: ['Milano', 'Venedik'],  dailyTarget: 250, uptime: '14s 21dk', lastSuccess: '22:43' },
-  3: { proxy: 'Oxylabs NL-07',    interval: 52, cities: ['Amsterdam'],           dailyTarget: 150, uptime: '09s 45dk', lastSuccess: '21:55' },
-  4: { proxy: 'Oxylabs DE-03',    interval: 60, cities: ['Berlin', 'Münih'],     dailyTarget: 100, uptime: '0s',       lastSuccess: undefined },
-  5: { proxy: 'BrightData FR-01', interval: 55, cities: ['Paris'],              dailyTarget: 100, uptime: '0s',       lastSuccess: undefined },
-  6: { proxy: 'Oxylabs NL-12',    interval: 50, cities: ['Rotterdam'],           dailyTarget: 120, uptime: '02s 10dk', lastSuccess: undefined },
+type Bot = {
+  id: string
+  user_id: string
+  visa_account_id: string
+  name: string
+  provider: string
+  status: 'idle' | 'running' | 'paused' | 'error'
+  check_interval: number
+  auto_book: boolean
+  last_run: string | null
+  created_at: string
+  visa_accounts?: { email: string; country: string } | null
 }
 
-// 7 günlük performans tablosu
-const WEEKLY_PERF = [
-  { bot: 'İtalya Bot #1',   emoji: '🇮🇹', mon: 18, tue: 22, wed: 15, thu: 27, fri: 19, sat: 21, sun: 23, total: 145 },
-  { bot: 'İtalya Bot #2',   emoji: '🇮🇹', mon: 25, tue: 31, wed: 28, thu: 35, fri: 30, sat: 27, sun: 25, total: 201 },
-  { bot: 'Hollanda Bot #1', emoji: '🇳🇱', mon: 12, tue: 14, wed:  9, thu: 18, fri: 15, sat: 11, sun: 10, total:  89 },
-  { bot: 'Almanya Bot #1',  emoji: '🇩🇪', mon:  8, tue: 11, wed:  5, thu:  0, fri:  6, sat:  4, sun:  0, total:  34 },
-  { bot: 'Fransa Bot #1',   emoji: '🇫🇷', mon:  0, tue:  0, wed:  0, thu:  0, fri:  0, sat:  0, sun:  0, total:   0 },
-  { bot: 'Hollanda Bot #2', emoji: '🇳🇱', mon:  3, tue:  4, wed:  2, thu:  0, fri:  2, sat:  1, sun:  0, total:  12 },
-]
-const DAYS = ['Pzt', 'Sal', 'Çrş', 'Prş', 'Cum', 'Cmt', 'Bug'] as const
+type VisaAccount = { id: string; email: string; country: string }
 
-const statusCounts = {
-  running: MOCK_BOTS.filter(b => b.status === 'running').length,
-  error:   MOCK_BOTS.filter(b => b.status === 'error').length,
-  stopped: MOCK_BOTS.filter(b => b.status === 'stopped' || b.status === 'idle').length,
+const STATUS_CFG = {
+  idle:    { label: 'Bekliyor',   variant: 'default'  as const, dot: 'bg-slate-400'  },
+  running: { label: 'Çalışıyor', variant: 'success'  as const, dot: 'bg-emerald-400 animate-pulse' },
+  paused:  { label: 'Duraklatıldı', variant: 'warning' as const, dot: 'bg-amber-400' },
+  error:   { label: 'Hata',      variant: 'error'    as const, dot: 'bg-red-500'     },
 }
 
-/* ── Sayfa ─────────────────────────────────────────────────── */
+function AddBotModal({ accounts, onClose, onAdded }: { accounts: VisaAccount[]; onClose: () => void; onAdded: () => void }) {
+  const [form, setForm] = useState({ name: '', visa_account_id: accounts[0]?.id ?? '', check_interval: '60', auto_book: false })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setError('Oturum bulunamadı.'); setLoading(false); return }
+    const acc = accounts.find(a => a.id === form.visa_account_id)
+    const { error: err } = await supabase.from('bots').insert({
+      user_id: user.id,
+      visa_account_id: form.visa_account_id,
+      name: form.name,
+      provider: acc ? 'vfs' : 'vfs',
+      check_interval: parseInt(form.check_interval),
+      auto_book: form.auto_book,
+    })
+    if (err) { setError(err.message); setLoading(false); return }
+    onAdded(); onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Yeni Bot Oluştur</h2>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
+          {accounts.length === 0 && (
+            <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              Bot oluşturmak için önce bir VFS hesabı ekleyin.
+            </div>
+          )}
+          <div>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">Bot Adı *</label>
+            <input required type="text" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="İtalya Bot #1"
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">VFS Hesabı *</label>
+            <select required value={form.visa_account_id} onChange={e => setForm(p => ({ ...p, visa_account_id: e.target.value }))}
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.email} — {a.country}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">Tarama Aralığı (sn) *</label>
+            <input type="number" min="10" max="3600" value={form.check_interval} onChange={e => setForm(p => ({ ...p, check_interval: e.target.value }))}
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={form.auto_book} onChange={e => setForm(p => ({ ...p, auto_book: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+            <span className="text-sm text-slate-700 dark:text-slate-300">Otomatik rezervasyon yap</span>
+          </label>
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="outline" type="button" onClick={onClose}>İptal</Button>
+            <Button type="submit" disabled={loading || accounts.length === 0}>
+              {loading ? <><Loader2 className="w-3 h-3 animate-spin" />Oluşturuluyor...</> : 'Bot Oluştur'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
 
 export default function BotsPage() {
-  const totalAttempts = MOCK_BOTS.reduce((s, b) => s + b.todayAttempts, 0)
-  const totalFound    = MOCK_BOTS.reduce((s, b) => s + b.todayFound, 0)
-  const activeBots    = MOCK_BOTS.filter(b => b.successRate > 0)
-  const avgSuccess    = activeBots.length
-    ? Math.round(activeBots.reduce((s, b) => s + b.successRate, 0) / activeBots.length)
-    : 0
+  const [bots,     setBots]     = useState<Bot[]>([])
+  const [accounts, setAccounts] = useState<VisaAccount[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [showModal,setShowModal]= useState(false)
+
+  const fetchData = useCallback(async () => {
+    const supabase = createClient()
+    const [{ data: botsData }, { data: accData }] = await Promise.all([
+      supabase.from('bots').select('*, visa_accounts(email, country)').order('created_at', { ascending: false }),
+      supabase.from('visa_accounts').select('id, email, country').eq('status', 'active'),
+    ])
+    setBots((botsData ?? []) as Bot[])
+    setAccounts(accData ?? [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const setStatus = async (id: string, status: Bot['status']) => {
+    const supabase = createClient()
+    await supabase.from('bots').update({ status }).eq('id', id)
+    setBots(prev => prev.map(b => b.id === id ? { ...b, status } : b))
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Bu botu silmek istiyor musunuz? Tüm loglar da silinecek.')) return
+    const supabase = createClient()
+    await supabase.from('bots').delete().eq('id', id)
+    setBots(prev => prev.filter(b => b.id !== id))
+  }
+
+  if (loading) return <div className="h-64 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse" />
 
   return (
     <div className="space-y-6">
+      {showModal && <AddBotModal accounts={accounts} onClose={() => setShowModal(false)} onAdded={fetchData} />}
 
-      {/* ── Üst KPI + butonlar ───────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          {[
-            { icon: Activity,      label: 'Aktif',       value: statusCounts.running, dot: 'bg-emerald-400' },
-            { icon: WifiOff,       label: 'Hatalı',      value: statusCounts.error,   dot: 'bg-red-500'     },
-            { icon: Square,        label: 'Pasif',        value: statusCounts.stopped, dot: 'bg-slate-400'   },
-            { icon: Target,        label: 'Bugün Deneme', value: totalAttempts,        dot: 'bg-blue-400'    },
-            { icon: CalendarCheck, label: 'Bulunan',      value: totalFound,           dot: 'bg-emerald-500' },
-          ].map(item => (
-            <div key={item.label} className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center gap-2.5 shadow-sm">
-              <span className={cn('w-2 h-2 rounded-full flex-shrink-0', item.dot)} />
-              <span className="text-sm font-bold text-slate-800">{item.value}</span>
-              <span className="text-xs text-slate-500">{item.label}</span>
+      {/* KPI */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {(['running', 'idle', 'paused', 'error'] as Bot['status'][]).map(s => {
+          const count = bots.filter(b => b.status === s).length
+          const sc = STATUS_CFG[s]
+          return (
+            <div key={s} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 flex items-center gap-3">
+              <span className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', sc.dot)} />
+              <div>
+                <p className="text-xl font-bold text-slate-800 dark:text-slate-100">{count}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{sc.label}</p>
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm"><Square   className="w-3 h-3" />Tümünü Durdur</Button>
-          <Button variant="secondary" size="sm"><Play     className="w-3 h-3" />Tümünü Başlat</Button>
-          <Button size="sm">                  <Plus     className="w-3 h-3" />Yeni Bot</Button>
-        </div>
+          )
+        })}
       </div>
 
-      {/* ── Hata uyarısı ─────────────────────────────────────── */}
-      {statusCounts.error > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-          <div className="w-9 h-9 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <WifiOff className="w-4 h-4 text-red-600" />
+      {/* Başlık + ekle butonu */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Bot Listesi ({bots.length})</h2>
+        <Button size="sm" onClick={() => setShowModal(true)}><Plus className="w-3 h-3" />Bot Oluştur</Button>
+      </div>
+
+      {/* Empty state */}
+      {bots.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center justify-center py-20 gap-4">
+          <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center">
+            <Database className="w-7 h-7 text-slate-400" />
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-700">
-              {statusCounts.error} bot hata durumunda — acil müdahale gerekebilir
-            </p>
-            <p className="text-xs text-red-500 mt-0.5">
-              Almanya Bot #1 — VFS Germany sunucusuna bağlantı kurulamıyor. Son deneme 23 dk önce.
-              Proxy değiştirmeyi veya VFS hesabını kontrol etmeyi deneyin.
-            </p>
+          <div className="text-center">
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Henüz bot oluşturulmadı</p>
+            <p className="text-xs text-slate-400 mt-1">VFS hesabı ekleyip bot oluşturarak taramaya başlayın.</p>
           </div>
-          <Button variant="danger" size="sm" className="flex-shrink-0">
-            <RefreshCw className="w-3 h-3" />Yeniden Başlat
-          </Button>
+          <Button onClick={() => setShowModal(true)}><Plus className="w-3 h-3" />İlk Botu Oluştur</Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {bots.map(bot => {
+            const sc = STATUS_CFG[bot.status]
+            return (
+              <div key={bot.id} className={cn(
+                'bg-white dark:bg-slate-900 rounded-xl border shadow-sm p-5',
+                bot.status === 'error' ? 'border-red-200 dark:border-red-900' :
+                bot.status === 'running' ? 'border-emerald-200 dark:border-emerald-900' :
+                'border-slate-200 dark:border-slate-800'
+              )}>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center">
+                      <Zap className="w-4 h-4 text-blue-500" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm text-slate-800 dark:text-slate-100">{bot.name}</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">{bot.visa_accounts?.email ?? '—'}</p>
+                    </div>
+                  </div>
+                  <Badge variant={sc.variant} dot>{sc.label}</Badge>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 text-center">
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{bot.check_interval}s</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Aralık</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 text-center">
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{bot.visa_accounts?.country ?? '—'}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Ülke</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-2 text-center">
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{bot.auto_book ? 'Evet' : 'Hayır'}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Oto-Rezerv</p>
+                  </div>
+                </div>
+
+                {bot.last_run && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-3">
+                    <Clock className="w-3 h-3" />Son: {new Date(bot.last_run).toLocaleString('tr-TR')}
+                  </p>
+                )}
+
+                <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  {bot.status !== 'running' ? (
+                    <Button size="sm" onClick={() => setStatus(bot.id, 'running')} className="flex-1">
+                      <Play className="w-3 h-3" />Başlat
+                    </Button>
+                  ) : (
+                    <Button variant="secondary" size="sm" onClick={() => setStatus(bot.id, 'idle')} className="flex-1">
+                      <Square className="w-3 h-3" />Durdur
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => setStatus(bot.id, 'idle')}>
+                    <RefreshCw className="w-3 h-3" />
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={() => handleDelete(bot.id)}>Sil</Button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
-
-      {/* ── Bot kartları ─────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <h2 className="text-sm font-semibold text-slate-700">Tüm Botlar</h2>
-          <div className="flex gap-1.5">
-            {(['Tümü', 'Çalışıyor', 'Hata', 'Durduruldu'] as const).map((f, i) => (
-              <button key={f} className={cn(
-                'text-xs px-3 py-1 rounded-full font-medium transition-colors',
-                i === 0 ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              )}>
-                {f}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {MOCK_BOTS.map(bot => (
-            <BotStatusCard key={bot.id} bot={bot} />
-          ))}
-        </div>
-      </div>
-
-      {/* ── Bot konfigürasyon tablosu ─────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-800">Bot Konfigürasyonları</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Proxy, tarama aralığı ve hedef şehir bilgileri</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100">
-                {['Bot', 'Durum', 'Proxy', 'Tarama Aralığı', 'Hedef Şehirler', 'Uptime', 'Son Başarı'].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-slate-500 py-3 px-4 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {MOCK_BOTS.map(bot => {
-                const cfg = BOT_CONFIG[bot.id]
-                const isOk = bot.status === 'running'
-                return (
-                  <tr key={bot.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 font-medium text-slate-800 whitespace-nowrap">
-                      {bot.countryEmoji} {bot.name}
-                    </td>
-                    <td className="py-3 px-4">
-                      <Badge
-                        variant={bot.status === 'running' ? 'success' : bot.status === 'error' ? 'error' : 'default'}
-                        dot
-                      >
-                        {bot.status === 'running' ? 'Çalışıyor' : bot.status === 'error' ? 'Hata' : bot.status === 'stopped' ? 'Durdu' : 'Bekliyor'}
-                      </Badge>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-1.5">
-                        {isOk
-                          ? <Wifi    className="w-3 h-3 text-emerald-500" />
-                          : <WifiOff className="w-3 h-3 text-slate-400" />
-                        }
-                        <span className="text-xs text-slate-600">{cfg.proxy}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3 h-3 text-slate-400" />
-                        <span className="text-xs text-slate-600">{cfg.interval}s</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex gap-1 flex-wrap max-w-[180px]">
-                        {cfg.cities.map(c => (
-                          <span key={c} className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{c}</span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{cfg.uptime}</td>
-                    <td className="py-3 px-4 text-xs font-mono">
-                      {cfg.lastSuccess
-                        ? <span className="text-emerald-600 font-semibold">{cfg.lastSuccess}</span>
-                        : <span className="text-slate-400">—</span>
-                      }
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Haftalık performans tablosu ───────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">Haftalık Deneme Dağılımı</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Bugün dahil son 7 gün — başarılı slot bulma sayısı</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
-            Haftalık toplam: <span className="font-bold text-slate-700 ml-1">{WEEKLY_PERF.reduce((s, r) => s + r.total, 0)} deneme</span>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="text-left text-xs font-semibold text-slate-500 py-3 px-5 w-44">Bot</th>
-                {DAYS.map((d, i) => (
-                  <th key={d} className={cn(
-                    'text-center text-xs font-semibold py-3 px-3',
-                    i === 6 ? 'text-blue-600' : 'text-slate-500'
-                  )}>
-                    {d}
-                    {i === 6 && <span className="block text-xs text-blue-400 font-normal">bugün</span>}
-                  </th>
-                ))}
-                <th className="text-right text-xs font-semibold text-slate-500 py-3 px-5">Toplam</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {WEEKLY_PERF.map(row => {
-                const vals = [row.mon, row.tue, row.wed, row.thu, row.fri, row.sat, row.sun]
-                const max  = Math.max(...vals)
-                return (
-                  <tr key={row.bot} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-5 font-medium text-slate-800 whitespace-nowrap">
-                      {row.emoji} {row.bot}
-                    </td>
-                    {vals.map((v, i) => (
-                      <td key={i} className="py-3 px-3 text-center">
-                        <span className={cn(
-                          'inline-flex items-center justify-center w-8 h-7 rounded text-xs font-semibold',
-                          v === 0   ? 'text-slate-300'
-                            : v === max && max > 0 ? 'bg-blue-600 text-white'
-                            : v >= max * 0.7       ? 'bg-blue-100 text-blue-700'
-                            : 'text-slate-600'
-                        )}>
-                          {v || '—'}
-                        </span>
-                      </td>
-                    ))}
-                    <td className="py-3 px-5 text-right font-bold text-slate-800">{row.total}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-slate-200 bg-slate-50">
-                <td className="py-3 px-5 text-xs font-semibold text-slate-600">Günlük Toplam</td>
-                {[
-                  WEEKLY_PERF.reduce((s, r) => s + r.mon, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.tue, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.wed, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.thu, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.fri, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.sat, 0),
-                  WEEKLY_PERF.reduce((s, r) => s + r.sun, 0),
-                ].map((v, i) => (
-                  <td key={i} className={cn(
-                    'py-3 px-3 text-center text-xs font-bold',
-                    i === 6 ? 'text-blue-600' : 'text-slate-700'
-                  )}>
-                    {v}
-                  </td>
-                ))}
-                <td className="py-3 px-5 text-right text-xs font-bold text-slate-700">
-                  {WEEKLY_PERF.reduce((s, r) => s + r.total, 0)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Bugünün özeti ─────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">Bugünün Performansı</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: 'Toplam Deneme',   value: totalAttempts,        color: 'bg-blue-50',    text: 'text-blue-700'    },
-            { label: 'Bulunan Randevu', value: totalFound,           color: 'bg-emerald-50', text: 'text-emerald-700' },
-            { label: 'Ort. Başarı',    value: `%${avgSuccess}`,      color: 'bg-violet-50',  text: 'text-violet-700'  },
-            { label: 'Toplam Uptime',  value: '14.2 sa',             color: 'bg-slate-50',   text: 'text-slate-700'   },
-          ].map(item => (
-            <div key={item.label} className={cn('rounded-xl p-4', item.color)}>
-              <p className={cn('text-2xl font-bold', item.text)}>{item.value}</p>
-              <p className="text-xs text-slate-500 mt-1">{item.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
