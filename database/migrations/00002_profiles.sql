@@ -1,8 +1,13 @@
 -- =============================================================================
--- 00002 — profiles tablosu
+-- 00002 — profiles tablosu + is_admin() fonksiyonu
 -- =============================================================================
 -- Auth.users tablosunu genişleten kullanıcı profil tablosu.
 -- Her auth kullanıcısı için 1:1 ilişki.
+--
+-- NEDEN is_admin() burada?
+--   is_admin() fonksiyonu public.profiles tablosuna referans verir.
+--   LANGUAGE plpgsql kullanılsa dahi tablonun var olması tercih edilir.
+--   Bu nedenle profiles oluştuktan hemen sonra tanımlanır.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -24,6 +29,32 @@ COMMENT ON COLUMN public.profiles.role       IS 'admin veya user.';
 CREATE TRIGGER profiles_updated_at
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ── is_admin() — profiles tablosu oluştuktan SONRA ─────────────────────────
+-- LANGUAGE plpgsql: tablo referansı çalışma zamanında çözülür,
+-- "relation does not exist" hatası oluşmaz.
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id   = auth.uid()
+      AND role = 'admin'
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION public.is_admin() IS
+  'Mevcut auth.uid() kullanıcısının admin rolünde olup olmadığını döner. SECURITY DEFINER ile RLS bypass.';
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 -- ── Row Level Security ────────────────────────────────────────────────────────
 

@@ -24,20 +24,9 @@ COMMENT ON FUNCTION public.set_updated_at() IS
 -- is_admin() — Mevcut kullanıcının admin rolünü kontrol eder
 -- SECURITY DEFINER: RLS bypass ile profiles tablosunu okur.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.profiles
-    WHERE id   = auth.uid()
-      AND role = 'admin'
-  );
-$$;
+-- UYARI: is_admin() fonksiyonu public.profiles tablosuna bağımlıdır.
+-- Bu fonksiyon 00002_profiles.sql ÇALIŞTIRILDIKTAN SONRA oluşturulmalıdır.
+-- Bu nedenle is_admin() tanımı 00002_profiles.sql dosyasının SONUNA taşınmıştır.
 
 COMMENT ON FUNCTION public.is_admin() IS
   'Mevcut auth.uid() kullanıcısının admin rolünde olup olmadığını döner.';
