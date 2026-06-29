@@ -1,12 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/helpers/cn'
+import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, Bot, Globe, FileText, CalendarCheck,
   ScrollText, Users, Settings, ChevronRight, Zap, X,
   Shield, Fingerprint, CalendarDays, BarChart3, Bell, UserCog,
+  LogOut,
 } from 'lucide-react'
 
 const NAV_SECTIONS = [
@@ -58,6 +60,14 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname()
+  const router   = useRouter()
+
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+    router.refresh()
+  }
 
   return (
     <>
@@ -127,7 +137,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Kullanıcı */}
+        {/* Kullanıcı + Çıkış */}
         <div className="p-4 border-t border-white/8">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-700 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 shadow">
@@ -137,6 +147,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               <p className="text-white text-sm font-medium truncate">Admin</p>
               <p className="text-slate-500 text-xs truncate">admin@vizerandevu.com</p>
             </div>
+            <button
+              onClick={handleSignOut}
+              title="Çıkış Yap"
+              className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-white/8 rounded-lg transition-colors flex-shrink-0"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>
