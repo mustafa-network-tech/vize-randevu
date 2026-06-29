@@ -25,6 +25,16 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
+
+  // Auth sayfaları sidebar/header olmadan render edilir
+  if (pathname.startsWith('/auth')) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-200">
+        {children}
+      </div>
+    )
+  }
+
   const meta = PAGE_META[pathname] ?? { title: 'Vize Randevu', subtitle: '' }
 
   return (
