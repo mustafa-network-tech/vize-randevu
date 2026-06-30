@@ -6,6 +6,7 @@ import { DarkModeToggle } from './DarkModeToggle'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/helpers/cn'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 
 interface HeaderProps {
@@ -46,7 +47,7 @@ export function Header({ onMenuClick, title, subtitle }: HeaderProps) {
 
   return (
     <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 lg:px-6 flex-shrink-0 transition-colors duration-200">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
           className="lg:hidden p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
@@ -54,7 +55,15 @@ export function Header({ onMenuClick, title, subtitle }: HeaderProps) {
         >
           <Menu className="w-5 h-5" />
         </button>
-        <div>
+        {/* Mobilde logo + isim görünür, masaüstünde gizlenir */}
+        <div className="flex items-center gap-2 lg:hidden">
+          <div className="w-7 h-7 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 flex-shrink-0">
+            <Image src="/images/logo.jpeg" alt="Logo" width={28} height={28} className="w-7 h-7 object-contain" />
+          </div>
+          <span className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight">MK Digital Systems</span>
+        </div>
+        {/* Masaüstünde sayfa başlığı görünür */}
+        <div className="hidden lg:block">
           <h1 className="text-base font-semibold text-slate-800 dark:text-slate-100 leading-tight">{title}</h1>
           {subtitle && (
             <p className="text-xs text-slate-400 dark:text-slate-500 leading-tight mt-0.5">{subtitle}</p>

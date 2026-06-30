@@ -7,10 +7,11 @@ import { cn } from '@/lib/helpers/cn'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, Bot, Globe, FileText, CalendarCheck,
-  ScrollText, Users, Settings, ChevronRight, Zap, X,
+  ScrollText, Users, Settings, ChevronRight, X,
   Shield, Fingerprint, CalendarDays, BarChart3, Bell, UserCog,
   LogOut, UserCheck, Crown, MonitorPlay, User,
 } from 'lucide-react'
+import Image from 'next/image'
 
 // adminOnly: true → sadece admin görür
 // adminOnly: false veya yok → herkes görür
@@ -125,14 +126,21 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         isOpen ? 'translate-x-0' : '-translate-x-full'
       )}>
         {/* Logo */}
-        <div className="flex items-center justify-between px-5 py-5 border-b border-white/8">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-white/8">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg">
-              <Zap className="w-4 h-4 text-white" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white/10 flex items-center justify-center">
+              <Image
+                src="/images/logo.jpeg"
+                alt="MK Digital Systems"
+                width={40}
+                height={40}
+                className="w-10 h-10 object-contain"
+                priority
+              />
             </div>
             <div>
-              <p className="text-white font-semibold text-sm leading-tight">Vize Randevu</p>
-              <p className="text-slate-500 text-xs">Otomasyon Paneli</p>
+              <p className="text-white font-bold text-sm leading-tight tracking-tight">MK Digital Systems</p>
+              <p className="text-slate-500 text-[11px] mt-0.5">Vize Randevu Paneli</p>
             </div>
           </div>
           <button onClick={onClose} className="lg:hidden text-slate-500 hover:text-white transition-colors p-1 rounded">
