@@ -21,6 +21,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   '/users':         { title: 'Personel Yönetimi',    subtitle: 'Kullanıcı rolleri ve erişim yetkileri'             },
   '/settings':      { title: 'Sistem Ayarları',      subtitle: 'Yapılandırma, güvenlik ve yedekleme ayarları'      },
   '/applicants':    { title: 'Başvuranlar',           subtitle: 'Otomatik rezervasyon için pasaport ve kişisel bilgiler' },
+  '/monitor':       { title: 'Canlı İzleme',         subtitle: 'Tüm kullanıcıların bot ve aktivite durumu' },
 }
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

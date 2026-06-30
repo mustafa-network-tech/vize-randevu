@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Bot, Globe, FileText, CalendarCheck,
   ScrollText, Users, Settings, ChevronRight, Zap, X,
   Shield, Fingerprint, CalendarDays, BarChart3, Bell, UserCog,
-  LogOut, UserCheck, Crown,
+  LogOut, UserCheck, Crown, MonitorPlay,
 } from 'lucide-react'
 
 // adminOnly: true → sadece admin görür
@@ -18,8 +18,9 @@ const NAV_SECTIONS = [
   {
     label: 'Genel Bakış',
     items: [
-      { name: 'Dashboard',   href: '/dashboard',    icon: LayoutDashboard, adminOnly: false },
-      { name: 'Analitik',    href: '/analytics',    icon: BarChart3,       adminOnly: true  },
+      { name: 'Dashboard',      href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
+      { name: 'Canlı İzleme',   href: '/monitor',   icon: MonitorPlay,     adminOnly: true  },
+      { name: 'Analitik',       href: '/analytics', icon: BarChart3,       adminOnly: true  },
     ],
   },
   {
