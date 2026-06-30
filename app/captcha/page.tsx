@@ -1,61 +1,114 @@
+'use client'
+
+import { useEffect, useState, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/helpers/cn'
-import { Fingerprint, Clock, CheckCircle, XCircle, Timer, RefreshCw, Zap } from 'lucide-react'
+import { Fingerprint, Clock, CheckCircle, XCircle, Timer, RefreshCw, AlertTriangle } from 'lucide-react'
 
-interface CaptchaEvent {
-  id: number
-  bot: string
-  country: string
-  countryEmoji: string
-  timestamp: string
-  status: 'solved' | 'failed' | 'pending'
-  duration: string | null
-  service: string
-  attempts: number
+type CaptchaLog = {
+  id: string
+  message: string
+  level: 'info' | 'success' | 'warning' | 'error'
+  created_at: string
+  bot_id: string
+  bots: { name: string } | null
 }
 
-const MOCK_EVENTS: CaptchaEvent[] = [
-  { id:  1, bot: 'İtalya Bot #2',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:47:03', status: 'solved',  duration: '4.2s',  service: '2Captcha', attempts: 1 },
-  { id:  2, bot: 'Hollanda Bot #1', country: 'Hollanda', countryEmoji: '🇳🇱', timestamp: '22:45:18', status: 'solved',  duration: '6.8s',  service: '2Captcha', attempts: 1 },
-  { id:  3, bot: 'Almanya Bot #1',  country: 'Almanya',  countryEmoji: '🇩🇪', timestamp: '22:43:30', status: 'failed',  duration: '12.1s', service: 'AntiCaptcha', attempts: 3 },
-  { id:  4, bot: 'İtalya Bot #1',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:41:55', status: 'solved',  duration: '3.9s',  service: '2Captcha', attempts: 1 },
-  { id:  5, bot: 'Hollanda Bot #1', country: 'Hollanda', countryEmoji: '🇳🇱', timestamp: '22:40:12', status: 'pending', duration: null,    service: '2Captcha', attempts: 0 },
-  { id:  6, bot: 'Almanya Bot #1',  country: 'Almanya',  countryEmoji: '🇩🇪', timestamp: '22:38:47', status: 'failed',  duration: '15.0s', service: 'AntiCaptcha', attempts: 5 },
-  { id:  7, bot: 'İtalya Bot #2',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:36:20', status: 'solved',  duration: '5.1s',  service: '2Captcha', attempts: 1 },
-  { id:  8, bot: 'İtalya Bot #1',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:33:44', status: 'solved',  duration: '4.7s',  service: '2Captcha', attempts: 2 },
-  { id:  9, bot: 'Hollanda Bot #2', country: 'Hollanda', countryEmoji: '🇳🇱', timestamp: '22:31:09', status: 'solved',  duration: '7.2s',  service: 'AntiCaptcha', attempts: 1 },
-  { id: 10, bot: 'Almanya Bot #1',  country: 'Almanya',  countryEmoji: '🇩🇪', timestamp: '22:28:33', status: 'failed',  duration: '11.4s', service: 'AntiCaptcha', attempts: 4 },
-  { id: 11, bot: 'İtalya Bot #2',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:25:57', status: 'solved',  duration: '3.5s',  service: '2Captcha', attempts: 1 },
-  { id: 12, bot: 'İtalya Bot #1',   country: 'İtalya',   countryEmoji: '🇮🇹', timestamp: '22:23:21', status: 'solved',  duration: '6.0s',  service: '2Captcha', attempts: 1 },
-]
-
-const counts = {
-  pending: MOCK_EVENTS.filter(e => e.status === 'pending').length,
-  solved:  MOCK_EVENTS.filter(e => e.status === 'solved').length,
-  failed:  MOCK_EVENTS.filter(e => e.status === 'failed').length,
-  total:   MOCK_EVENTS.length,
+type BotLog = {
+  id: string
+  level: string
+  created_at: string
+  bot_id: string
 }
-const solvedDurations = MOCK_EVENTS.filter(e => e.duration && e.status === 'solved')
-  .map(e => parseFloat(e.duration!))
-const avgDuration = solvedDurations.length
-  ? (solvedDurations.reduce((s, d) => s + d, 0) / solvedDurations.length).toFixed(1)
-  : '—'
 
-const successRate = Math.round((counts.solved / (counts.solved + counts.failed)) * 100)
-
-// Saatlik çözüm dağılımı (mock)
-const HOURLY = [
-  { hour: '19', solved: 3, failed: 0 },
-  { hour: '20', solved: 5, failed: 1 },
-  { hour: '21', solved: 8, failed: 2 },
-  { hour: '22', solved: 9, failed: 3 },
-]
-const HOURLY_MAX = 12
+function parseCaptchaStatus(log: CaptchaLog): 'solved' | 'failed' | 'pending' {
+  const msg = log.message.toLowerCase()
+  if (log.level === 'success' || msg.includes('çözüldü') || msg.includes('solved')) return 'solved'
+  if (log.level === 'error' || msg.includes('başarısız') || msg.includes('failed')) return 'failed'
+  return 'pending'
+}
 
 export default function CaptchaPage() {
+  const [captchaLogs, setCaptchaLogs] = useState<CaptchaLog[]>([])
+  const [allLogs,     setAllLogs]     = useState<BotLog[]>([])
+  const [loading,     setLoading]     = useState(true)
+  const [refreshing,  setRefreshing]  = useState(false)
+
+  const fetchData = useCallback(async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true)
+    const supabase = createClient()
+
+    const [{ data: capLogs }, { data: allLogRows }] = await Promise.all([
+      supabase
+        .from('bot_logs')
+        .select('id, message, level, created_at, bot_id, bots(name)')
+        .ilike('message', '%captcha%')
+        .order('created_at', { ascending: false })
+        .limit(100),
+      supabase
+        .from('bot_logs')
+        .select('id, level, created_at, bot_id')
+        .order('created_at', { ascending: false })
+        .limit(500),
+    ])
+
+    setCaptchaLogs((capLogs ?? []) as unknown as CaptchaLog[])
+    setAllLogs((allLogRows ?? []) as BotLog[])
+    setLoading(false)
+    setRefreshing(false)
+  }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // Saatlik dağılım (son 6 saat)
+  const HOURS = Array.from({ length: 6 }, (_, i) => {
+    const h = new Date()
+    h.setHours(h.getHours() - (5 - i), 0, 0, 0)
+    return h.getHours()
+  })
+  const currentHour = new Date().getHours()
+
+  const hourlyData = HOURS.map(h => ({
+    hour: h,
+    captcha: captchaLogs.filter(l => new Date(l.created_at).getHours() === h).length,
+    total:   allLogs.filter(l => new Date(l.created_at).getHours() === h).length,
+  }))
+  const hourlyMax = Math.max(...hourlyData.map(d => d.total), 1)
+
+  const counts = {
+    solved:  captchaLogs.filter(l => parseCaptchaStatus(l) === 'solved').length,
+    failed:  captchaLogs.filter(l => parseCaptchaStatus(l) === 'failed').length,
+    pending: captchaLogs.filter(l => parseCaptchaStatus(l) === 'pending').length,
+  }
+  const total = counts.solved + counts.failed
+  const successRate = total > 0 ? Math.round((counts.solved / total) * 100) : 0
+
+  if (loading) return (
+    <div className="space-y-4">
+      {[...Array(3)].map((_, i) => (
+        <div key={i} className="h-24 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse" />
+      ))}
+    </div>
+  )
+
   return (
     <div className="space-y-6">
+
+      {/* CAPTCHA entegrasyon bilgi banner */}
+      {captchaLogs.length === 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl px-5 py-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">CAPTCHA olayı kaydedilmedi</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+              Bot motoru henüz CAPTCHA ile karşılaşmadı. VFS portalında CAPTCHA çıktığında bu sayfa otomatik dolacaktır.
+              CAPTCHA log kaydı için bot_logs mesajında "captcha" ifadesi geçmesi gerekir.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* KPI kartları */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -72,21 +125,21 @@ export default function CaptchaPage() {
             value: counts.solved,
             icon: CheckCircle,
             color: 'bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400',
-            note: `Bugün toplam`,
+            note: `${total} işlemden`,
           },
           {
             label: 'Başarısız CAPTCHA',
             value: counts.failed,
             icon: XCircle,
             color: 'bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400',
-            note: `%${100 - successRate} başarısızlık oranı`,
+            note: total > 0 ? `%${100 - successRate} başarısızlık oranı` : 'Kayıt yok',
           },
           {
-            label: 'Ort. Çözüm Süresi',
-            value: `${avgDuration}s`,
+            label: 'Toplam Log Kaydı',
+            value: allLogs.length,
             icon: Timer,
             color: 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400',
-            note: 'Otomatik servis',
+            note: 'Tüm bot logları',
           },
         ].map(item => (
           <div key={item.label} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-5">
@@ -105,19 +158,23 @@ export default function CaptchaPage() {
       {/* Başarı oranı + Saatlik dağılım */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-        {/* SVG başarı donut */}
+        {/* Başarı donut */}
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 flex flex-col items-center justify-center">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-4 self-start">Başarı Oranı</h3>
           <div className="relative w-36 h-36">
             <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="3"
                 className="dark:[stroke:#1e293b]" />
-              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#10b981" strokeWidth="3"
-                strokeDasharray={`${successRate} ${100 - successRate}`}
-                strokeLinecap="round" />
+              {total > 0 && (
+                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#10b981" strokeWidth="3"
+                  strokeDasharray={`${successRate} ${100 - successRate}`}
+                  strokeLinecap="round" />
+              )}
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-bold text-slate-800 dark:text-slate-100">%{successRate}</span>
+              <span className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+                {total > 0 ? `%${successRate}` : '—'}
+              </span>
               <span className="text-xs text-slate-400">başarı</span>
             </div>
           </div>
@@ -137,35 +194,34 @@ export default function CaptchaPage() {
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-5">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Saatlik Dağılım</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Çözülen ve başarısız CAPTCHA sayısı</p>
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Saatlik Bot Aktivitesi</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Son 6 saat — CAPTCHA ve genel log sayısı</p>
             </div>
             <div className="flex items-center gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-emerald-500 rounded-sm inline-block" />Çözüldü</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-red-400 rounded-sm inline-block" />Başarısız</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-blue-500 rounded-sm inline-block" />Toplam Log</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-amber-400 rounded-sm inline-block" />CAPTCHA</span>
             </div>
           </div>
-          <div className="flex items-end gap-6 h-32">
-            {HOURLY.map(h => {
-              const totalH = h.solved + h.failed
-              const solvedH = Math.round((h.solved / HOURLY_MAX) * 100)
-              const failedH = Math.round((h.failed / HOURLY_MAX) * 100)
-              const isNow = h.hour === '22'
+          <div className="flex items-end gap-4 h-32">
+            {hourlyData.map(h => {
+              const totalH   = Math.round((h.total   / hourlyMax) * 100)
+              const captchaH = h.total > 0 ? Math.round((h.captcha / hourlyMax) * 100) : 0
+              const isNow    = h.hour === currentHour
               return (
                 <div key={h.hour} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{totalH}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">{h.total}</span>
                   <div className="w-full flex gap-1 justify-center items-end" style={{ height: '90%' }}>
                     <div
-                      className={cn('flex-1 rounded-t transition-all', isNow ? 'bg-emerald-500' : 'bg-emerald-200 dark:bg-emerald-900')}
-                      style={{ height: `${solvedH}%` }}
+                      className={cn('flex-1 rounded-t transition-all', isNow ? 'bg-blue-500' : 'bg-blue-200 dark:bg-blue-900')}
+                      style={{ height: `${Math.max(totalH, h.total > 0 ? 5 : 0)}%` }}
                     />
                     <div
-                      className={cn('flex-1 rounded-t transition-all', isNow ? 'bg-red-500' : 'bg-red-200 dark:bg-red-900')}
-                      style={{ height: `${failedH}%` }}
+                      className={cn('flex-1 rounded-t transition-all', isNow ? 'bg-amber-400' : 'bg-amber-200 dark:bg-amber-900')}
+                      style={{ height: `${Math.max(captchaH, h.captcha > 0 ? 5 : 0)}%` }}
                     />
                   </div>
                   <span className={cn('text-xs font-medium', isNow ? 'text-blue-600' : 'text-slate-400')}>
-                    {h.hour}:00
+                    {h.hour.toString().padStart(2, '0')}:00
                   </span>
                 </div>
               )
@@ -174,71 +230,77 @@ export default function CaptchaPage() {
         </div>
       </div>
 
-      {/* Son işlemler tablosu */}
+      {/* Son CAPTCHA logları */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Son İşlemler</h3>
-            {counts.pending > 0 && (
-              <Badge variant="warning" dot>{counts.pending} bekliyor</Badge>
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">CAPTCHA Log Kayıtları</h3>
+            {captchaLogs.length > 0 && (
+              <Badge variant="info">{captchaLogs.length} kayıt</Badge>
             )}
           </div>
-          <Button variant="secondary" size="sm">
-            <RefreshCw className="w-3 h-3" />Yenile
+          <Button variant="secondary" size="sm" onClick={() => fetchData(true)} disabled={refreshing}>
+            <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />Yenile
           </Button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-slate-800">
-                {['Bot', 'Ülke', 'Saat', 'Servis', 'Deneme', 'Süre', 'Durum'].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-slate-500 dark:text-slate-400 py-3 px-4 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-              {MOCK_EVENTS.map(ev => (
-                <tr key={ev.id} className={cn(
-                  'transition-colors',
-                  ev.status === 'failed'  ? 'bg-red-50/40 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/40' :
-                  ev.status === 'pending' ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/40' :
-                  'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                )}>
-                  <td className="py-3 px-4 text-xs font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">{ev.bot}</td>
-                  <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{ev.countryEmoji} {ev.country}</td>
-                  <td className="py-3 px-4 text-xs font-mono text-slate-400 dark:text-slate-500">{ev.timestamp}</td>
-                  <td className="py-3 px-4">
-                    <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded font-medium">{ev.service}</span>
-                  </td>
-                  <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300">{ev.attempts || '—'}</td>
-                  <td className="py-3 px-4">
-                    {ev.duration ? (
-                      <div className="flex items-center gap-1 text-xs">
-                        <Clock className="w-3 h-3 text-slate-400" />
-                        <span className={cn(
-                          parseFloat(ev.duration) < 7 ? 'text-emerald-600' :
-                          parseFloat(ev.duration) < 10 ? 'text-amber-600' : 'text-red-500'
-                        )}>{ev.duration}</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-xs text-amber-600">
-                        <Zap className="w-3 h-3 animate-pulse" />Çözülüyor
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-3 px-4">
-                    <Badge
-                      variant={ev.status === 'solved' ? 'success' : ev.status === 'failed' ? 'error' : 'warning'}
-                      dot
-                    >
-                      {ev.status === 'solved' ? 'Çözüldü' : ev.status === 'failed' ? 'Başarısız' : 'Bekliyor'}
-                    </Badge>
-                  </td>
+
+        {captchaLogs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <Fingerprint className="w-12 h-12 text-slate-200 dark:text-slate-700" />
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Henüz CAPTCHA log kaydı bulunmuyor.
+            </p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 text-center max-w-sm">
+              Bot motoru VFS portalında CAPTCHA ile karşılaştığında loglar buraya yansıyacaktır.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-slate-800">
+                  {['Bot', 'Mesaj', 'Saat', 'Durum'].map(h => (
+                    <th key={h} className="text-left text-xs font-semibold text-slate-500 dark:text-slate-400 py-3 px-4 whitespace-nowrap">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {captchaLogs.map(log => {
+                  const st = parseCaptchaStatus(log)
+                  return (
+                    <tr key={log.id} className={cn(
+                      'transition-colors',
+                      st === 'failed'  ? 'bg-red-50/40 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/40' :
+                      st === 'pending' ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/40' :
+                      'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    )}>
+                      <td className="py-3 px-4 text-xs font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                        {(log.bots as { name: string } | null)?.name ?? '—'}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate">
+                        {log.message}
+                      </td>
+                      <td className="py-3 px-4 text-xs font-mono text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(log.created_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <Badge
+                          variant={st === 'solved' ? 'success' : st === 'failed' ? 'error' : 'warning'}
+                          dot
+                        >
+                          {st === 'solved' ? 'Çözüldü' : st === 'failed' ? 'Başarısız' : 'Bekliyor'}
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

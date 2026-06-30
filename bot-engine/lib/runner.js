@@ -6,42 +6,60 @@ const { notifyAppointmentFound, notifyBotError, notifyBotStopped, sendTelegram }
 const MAX_CONSECUTIVE_ERRORS = 5
 const runningBots = new Set()
 
-/**
- * Tek bir botu çalıştırır:
- * 1. Playwright ile VFS'ye giriş yap
- * 2. Slotları kontrol et
- * 3. Slot bulunduysa DB'ye yaz ve bildirim gönder
- * 4. auto_book = true ise başvuran bilgileriyle randevu al
- */
+const C = { cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', dim: '\x1b[2m', reset: '\x1b[0m' }
+
 async function runBot(bot) {
   if (runningBots.has(bot.id)) return
 
-  const supabase  = getSupabase()
-  const logger    = createLogger(bot.id)
-  const account   = bot.visa_accounts
+  const supabase = getSupabase()
+  const logger   = createLogger(bot.id, bot.name)
+  const account  = bot.visa_accounts
 
   runningBots.add(bot.id)
+
+  // Son çalışma zamanını güncelle
   await supabase.from('bots').update({ last_run: new Date().toISOString() }).eq('id', bot.id)
-  await logger.info(`Bot başlatıldı: ${bot.name} — ${account?.country ?? '?'} / ${account?.email ?? '?'}`)
+
+  console.log(`\n${C.cyan}${'─'.repeat(60)}${C.reset}`)
+  console.log(`${C.cyan}▶ Bot döngüsü başlıyor: ${bot.name}${C.reset}`)
+  console.log(`${C.dim}  Hesap : ${account?.email ?? '?'}`)
+  console.log(`  Ülke  : ${account?.country ?? '?'}`)
+  console.log(`  ID    : ${bot.id}${C.reset}`)
+  console.log(`${C.cyan}${'─'.repeat(60)}${C.reset}\n`)
+
+  await logger.info(`Bot döngüsü başlatıldı — hesap: ${account?.email ?? '?'}, ülke: ${account?.country ?? '?'}`)
 
   const notifyFn = async (title, message) => {
     await sendTelegram(`<b>${title}</b>\n${message}`)
-    await supabase.from('notifications').insert({ user_id: bot.user_id, type: 'warning', title, message, is_read: false })
+    const { error: nErr } = await supabase.from('notifications').insert({
+      user_id: bot.user_id, type: 'warning', title, message, is_read: false,
+    })
+    if (nErr) console.error(`${C.red}[runner] Bildirim insert hatası:${C.reset}`, nErr.message)
   }
 
   const client = new VfsPlaywrightClient(account, logger, notifyFn)
 
   try {
+    // ── 1. Tarayıcı başlat ──────────────────────────────
+    await logger.info('Playwright tarayıcısı başlatılıyor...')
     await client.launch()
+    await logger.info('Tarayıcı başlatıldı.')
+
+    // ── 2. Slot kontrolü (login + sayfa açma + parse) ──
+    await logger.info(`VFS giriş deneniyor: ${account?.email ?? '?'}`)
     const slots = await client.checkSlots()
 
+    // ── 3. Sonuç ───────────────────────────────────────
     if (slots.length === 0) {
+      await logger.info('Randevu bulunamadı — bir sonraki döngüde tekrar denenecek.')
       runningBots.delete(bot.id)
       await client.close()
       return
     }
 
-    // Bulunan slotları DB'ye kaydet
+    await logger.success(`${slots.length} randevu slotu bulundu! İşleme alınıyor...`)
+
+    // ── 4. DB'ye kaydet ────────────────────────────────
     const rows = slots.map(slot => ({
       bot_id:           bot.id,
       country:          account?.country ?? 'Bilinmiyor',
@@ -53,21 +71,31 @@ async function runBot(bot) {
       status:           'available',
     }))
 
-    await supabase.from('appointments').upsert(rows, {
+    console.log(`${C.dim}[runner] appointments upsert — ${rows.length} kayıt...${C.reset}`)
+    const { error: upsertErr } = await supabase.from('appointments').upsert(rows, {
       onConflict: 'bot_id,appointment_date,appointment_time',
       ignoreDuplicates: true,
     })
-
-    // Bildirim gönder
-    for (const slot of slots) {
-      await notifyAppointmentFound(bot.user_id, bot.name, account?.country, slot.date, slot.time, slot.center ?? account?.visa_center)
+    if (upsertErr) {
+      console.error(`${C.red}[runner] appointments upsert HATA:${C.reset}`, upsertErr.message)
+      await logger.error(`Randevu kayıt hatası: ${upsertErr.message}`)
+    } else {
+      console.log(`${C.green}[runner] appointments upsert OK${C.reset}`)
+      await logger.success(`${rows.length} randevu appointments tablosuna kaydedildi.`)
     }
 
-    // Otomatik rezervasyon
-    if (bot.auto_book) {
-      await logger.info('Otomatik rezervasyon etkin — başvuran bilgileri alınıyor...')
+    // ── 5. Bildirim ────────────────────────────────────
+    for (const slot of slots) {
+      await notifyAppointmentFound(
+        bot.user_id, bot.name, account?.country,
+        slot.date, slot.time, slot.center ?? account?.visa_center,
+      )
+    }
 
-      const { data: applicants } = await supabase
+    // ── 6. Otomatik rezervasyon ────────────────────────
+    if (bot.auto_book) {
+      await logger.info('Otomatik rezervasyon etkin — başvuran bilgileri sorgulanıyor...')
+      const { data: applicants, error: appErr } = await supabase
         .from('applicants')
         .select('*')
         .eq('user_id', bot.user_id)
@@ -75,63 +103,61 @@ async function runBot(bot) {
         .order('priority', { ascending: true })
         .limit(1)
 
-      if (!applicants || applicants.length === 0) {
-        await logger.warning('Otomatik rezervasyon için başvuran bilgisi bulunamadı. /applicants sayfasından ekleyin.')
-        await notifyFn(
-          '⚠️ Başvuran Bilgisi Eksik',
-          `${bot.name} botu randevu buldu ama başvuran bilgisi kayıtlı değil.\nPanelden başvuran ekleyin.`
-        )
+      if (appErr) {
+        console.error(`${C.red}[runner] applicants sorgu hatası:${C.reset}`, appErr.message)
+        await logger.error(`Başvuran sorgu hatası: ${appErr.message}`)
+      } else if (!applicants || applicants.length === 0) {
+        await logger.warning('Başvuran bilgisi bulunamadı — /applicants sayfasından ekleyin.')
+        await notifyFn('⚠️ Başvuran Bilgisi Eksik',
+          `${bot.name} botu randevu buldu ama kayıtlı başvuran yok.\nPanelden ekleyin.`)
       } else {
         const applicant = applicants[0]
+        await logger.info(`Başvuran bulundu: ${applicant.full_name} — rezervasyon deneniyor...`)
         const result = await client.bookAppointment(slots[0], applicant)
 
         if (result.success) {
-          // Randevuyu "booked" olarak işaretle
           await supabase.from('appointments')
             .update({ status: 'booked' })
             .eq('bot_id', bot.id)
             .eq('appointment_date', slots[0].date)
 
-          await supabase.from('notifications').insert({
-            user_id: bot.user_id,
-            type: 'success',
-            title: `✅ Randevu Alındı! — ${account?.country}`,
-            message: `${applicant.full_name} için ${slots[0].date} ${slots[0].time ?? ''} tarihli randevu başarıyla alındı.${result.reference ? ` Referans: ${result.reference}` : ''}`,
-            is_read: false,
-          })
+          const successMsg = `${applicant.full_name} için ${slots[0].date} ${slots[0].time ?? ''} randevusu alındı.${result.reference ? ` Ref: ${result.reference}` : ''}`
+          await logger.success(`Rezervasyon başarılı! ${successMsg}`)
 
-          await sendTelegram(
-            `<b>✅ RANDEVU ALINDI!</b>\n` +
-            `Kişi: ${applicant.full_name}\n` +
-            `Ülke: ${account?.country}\n` +
-            `Tarih: ${slots[0].date} ${slots[0].time ?? ''}\n` +
-            (result.reference ? `Referans: ${result.reference}` : '')
-          )
+          await supabase.from('notifications').insert({
+            user_id: bot.user_id, type: 'success',
+            title: `✅ Randevu Alındı! — ${account?.country}`,
+            message: successMsg, is_read: false,
+          })
+          await sendTelegram(`<b>✅ RANDEVU ALINDI!</b>\nKişi: ${applicant.full_name}\nÜlke: ${account?.country}\nTarih: ${slots[0].date} ${slots[0].time ?? ''}${result.reference ? `\nRef: ${result.reference}` : ''}`)
+        } else {
+          await logger.error(`Rezervasyon başarısız: ${result.error ?? 'Bilinmeyen hata'}`)
         }
       }
     }
   } catch (err) {
-    await logger.error(`Beklenmedik hata: ${err.message}`)
+    console.error(`${C.red}[runner] ❌ Kritik hata:${C.reset}`, err.message)
+    await logger.error(`Kritik hata: ${err.message}`)
     await notifyBotError(bot.user_id, bot.name, err.message)
 
-    // Ardı ardına hata sayacı
     const { data: currentBot } = await supabase.from('bots').select('error_count').eq('id', bot.id).single()
     const errorCount = (currentBot?.error_count ?? 0) + 1
     await supabase.from('bots').update({ error_count: errorCount }).eq('id', bot.id)
 
     if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
       await supabase.from('bots').update({ status: 'error', error_count: 0 }).eq('id', bot.id)
-      await notifyBotStopped(bot.user_id, bot.name, `${MAX_CONSECUTIVE_ERRORS} ardı ardına hata oluştu — bot durduruldu.`)
+      await notifyBotStopped(bot.user_id, bot.name, `${MAX_CONSECUTIVE_ERRORS} ardı ardına hata — bot durduruldu.`)
+      await logger.error(`Bot ${MAX_CONSECUTIVE_ERRORS} hata sonrası durduruldu.`)
     }
   } finally {
     await client.close()
     runningBots.delete(bot.id)
+    console.log(`\n${C.dim}▶ Bot döngüsü tamamlandı: ${bot.name}${C.reset}\n`)
   }
 }
 
-/**
- * Tüm çalışan botların bir döngü turunu gerçekleştirir.
- */
+let _firstCycle = true
+
 async function runCycle() {
   const supabase = getSupabase()
   const { data: bots, error } = await supabase
@@ -139,19 +165,31 @@ async function runCycle() {
     .select('*, visa_accounts(email, encrypted_password, country, city, visa_center, visa_type, provider)')
     .eq('status', 'running')
 
-  if (error) { console.error('[runner] Bot listesi alınamadı:', error.message); return }
-  if (!bots || bots.length === 0) return
+  if (error) { console.error(`\x1b[31m[runner] Bot listesi alınamadı:\x1b[0m`, error.message); return }
+  if (!bots || bots.length === 0) {
+    process.stdout.write(`\r\x1b[2m[${new Date().toLocaleTimeString('tr-TR')}] Çalışan bot yok — bekleniyor...\x1b[0m`)
+    return
+  }
+
+  // İlk döngüde aktif botların ülke adlarını göster (debug)
+  if (_firstCycle) {
+    _firstCycle = false
+    console.log(`\n\x1b[36m[runner] Aktif botlar ve ülke isimleri:\x1b[0m`)
+    bots.forEach(b => {
+      const country = b.visa_accounts?.country ?? 'YOK'
+      console.log(`  • ${b.name} → ülke: "${country}" → normalize: "${country.replace(/İ/g,'i').replace(/I/g,'i').toLowerCase().trim()}"`)
+    })
+    console.log()
+  }
 
   const now = Date.now()
-  const promises = bots.map(async bot => {
-    const intervalMs = (bot.check_interval ?? 60) * 1000
-    const lastRun    = bot.last_run ? new Date(bot.last_run).getTime() : 0
-    if (now - lastRun >= intervalMs) {
-      await runBot(bot)
-    }
-  })
-
-  await Promise.allSettled(promises)
+  await Promise.allSettled(
+    bots.map(async bot => {
+      const intervalMs = (bot.check_interval ?? 60) * 1000
+      const lastRun    = bot.last_run ? new Date(bot.last_run).getTime() : 0
+      if (now - lastRun >= intervalMs) await runBot(bot)
+    })
+  )
 }
 
 module.exports = { runCycle, runBot }

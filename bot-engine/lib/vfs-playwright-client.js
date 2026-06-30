@@ -18,18 +18,44 @@ const SCREENSHOT_DIR = path.join(__dirname, '..', 'screenshots')
 if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
 
 // VFS Global ülke yapılandırması
-// Her ülke için giriş URL'si ve randevu sayfası URL'si
 const VFS_URLS = {
-  italya:     { base: 'https://visa.vfsglobal.com', login: '/tur/ita/login',    appointment: '/tur/ita/appointment/schedule-appointment' },
-  hollanda:   { base: 'https://visa.vfsglobal.com', login: '/tur/nld/login',    appointment: '/tur/nld/appointment/schedule-appointment' },
-  almanya:    { base: 'https://visa.vfsglobal.com', login: '/tur/deu/login',    appointment: '/tur/deu/appointment/schedule-appointment' },
-  fransa:     { base: 'https://visa.vfsglobal.com', login: '/tur/fra/login',    appointment: '/tur/fra/appointment/schedule-appointment' },
-  ispanya:    { base: 'https://visa.vfsglobal.com', login: '/tur/esp/login',    appointment: '/tur/esp/appointment/schedule-appointment' },
-  belcika:    { base: 'https://visa.vfsglobal.com', login: '/tur/bel/login',    appointment: '/tur/bel/appointment/schedule-appointment' },
-  avusturya:  { base: 'https://visa.vfsglobal.com', login: '/tur/aut/login',    appointment: '/tur/aut/appointment/schedule-appointment' },
-  isvicre:    { base: 'https://visa.vfsglobal.com', login: '/tur/che/login',    appointment: '/tur/che/appointment/schedule-appointment' },
-  yunanistan: { base: 'https://visa.vfsglobal.com', login: '/tur/grc/login',    appointment: '/tur/grc/appointment/schedule-appointment' },
-  polonya:    { base: 'https://visa.vfsglobal.com', login: '/tur/pol/login',    appointment: '/tur/pol/appointment/schedule-appointment' },
+  italya:     { base: 'https://visa.vfsglobal.com', login: '/tur/ita/login', appointment: '/tur/ita/appointment/schedule-appointment' },
+  hollanda:   { base: 'https://visa.vfsglobal.com', login: '/tur/nld/login', appointment: '/tur/nld/appointment/schedule-appointment' },
+  almanya:    { base: 'https://visa.vfsglobal.com', login: '/tur/deu/login', appointment: '/tur/deu/appointment/schedule-appointment' },
+  fransa:     { base: 'https://visa.vfsglobal.com', login: '/tur/fra/login', appointment: '/tur/fra/appointment/schedule-appointment' },
+  ispanya:    { base: 'https://visa.vfsglobal.com', login: '/tur/esp/login', appointment: '/tur/esp/appointment/schedule-appointment' },
+  belcika:    { base: 'https://visa.vfsglobal.com', login: '/tur/bel/login', appointment: '/tur/bel/appointment/schedule-appointment' },
+  avusturya:  { base: 'https://visa.vfsglobal.com', login: '/tur/aut/login', appointment: '/tur/aut/appointment/schedule-appointment' },
+  isvicre:    { base: 'https://visa.vfsglobal.com', login: '/tur/che/login', appointment: '/tur/che/appointment/schedule-appointment' },
+  yunanistan: { base: 'https://visa.vfsglobal.com', login: '/tur/grc/login', appointment: '/tur/grc/appointment/schedule-appointment' },
+  polonya:    { base: 'https://visa.vfsglobal.com', login: '/tur/pol/login', appointment: '/tur/pol/appointment/schedule-appointment' },
+  portekiz:   { base: 'https://visa.vfsglobal.com', login: '/tur/prt/login', appointment: '/tur/prt/appointment/schedule-appointment' },
+  cekya:      { base: 'https://visa.vfsglobal.com', login: '/tur/cze/login', appointment: '/tur/cze/appointment/schedule-appointment' },
+  danimarka:  { base: 'https://visa.vfsglobal.com', login: '/tur/dnk/login', appointment: '/tur/dnk/appointment/schedule-appointment' },
+}
+
+/**
+ * Türkçe karakterleri (İ, Ş, Ğ, vs.) doğru normalize eder.
+ * JS'nin .toLowerCase() fonksiyonu "İ" → "i̇" yapar (hatalı),
+ * bu fonksiyon "İ" → "i" yapar (doğru).
+ */
+function normalizeCountryKey(str) {
+  return (str ?? '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .replace(/Ş/g, 'ş')
+    .replace(/Ğ/g, 'ğ')
+    .replace(/Ü/g, 'ü')
+    .replace(/Ö/g, 'ö')
+    .replace(/Ç/g, 'ç')
+    .toLowerCase()
+    .trim()
+    // Yaygın alternatif yazımlar
+    .replace('belçika', 'belcika')
+    .replace('İsviçre', 'isvicre')
+    .replace('isviçre', 'isvicre')
+    .replace('çekya', 'cekya')
+    .replace('çek cumhuriyeti', 'cekya')
 }
 
 class VfsPlaywrightClient {
@@ -43,8 +69,13 @@ class VfsPlaywrightClient {
   }
 
   getUrls() {
-    const key = (this.account.country ?? '').toLowerCase().trim()
-    return VFS_URLS[key] ?? null
+    const key = normalizeCountryKey(this.account.country)
+    const urls = VFS_URLS[key] ?? null
+    if (!urls) {
+      console.warn(`[vfs-client] Bilinmeyen ülke: "${this.account.country}" → normalize: "${key}"`)
+      console.warn(`[vfs-client] Tanımlı ülkeler: ${Object.keys(VFS_URLS).join(', ')}`)
+    }
+    return urls
   }
 
   // ─────────────────────────────────────────────────────
@@ -82,8 +113,8 @@ class VfsPlaywrightClient {
 
     this.page = await context.newPage()
 
-    // Gereksiz kaynakları engelle (font, resim) — daha hızlı yükleme
-    await this.page.route('**/*.{png,jpg,gif,svg,woff,woff2}', r => r.abort())
+    // Yalnızca tracking/analytics isteklerini engelle — görseller gerekli (Angular SPA)
+    await this.page.route(/google-analytics|googletagmanager|facebook|hotjar|intercom/, r => r.abort())
   }
 
   // ─────────────────────────────────────────────────────
@@ -92,40 +123,89 @@ class VfsPlaywrightClient {
   async login() {
     const urls = this.getUrls()
     if (!urls) {
-      await this.logger.error(`"${this.account.country}" için VFS URL yapılandırması bulunamadı.`)
+      await this.logger.error(`"${this.account.country}" için VFS URL yapılandırması bulunamadı. vfs-playwright-client.js → VFS_URLS nesnesini kontrol edin.`)
       return false
     }
 
-    await this.logger.info(`VFS portalına giriş: ${this.account.email}`)
+    await this.logger.info(`VFS giriş deneniyor: ${this.account.email} — URL: ${urls.base + urls.login}`)
+
+    // VFS Global Angular Material form selektörleri (öncelik sırasına göre)
+    const EMAIL_SELECTORS = [
+      'input[formcontrolname="username"]',
+      'input[formcontrolname="email"]',
+      'input[formcontrolname="loginId"]',
+      'input[type="email"]',
+      'input[name="email"]',
+      'input[id*="email"]',
+      '#email',
+      'input[id*="username"]',
+      'input[name="username"]',
+    ].join(', ')
+
+    const PASSWORD_SELECTORS = [
+      'input[formcontrolname="password"]',
+      'input[type="password"]',
+      'input[name="password"]',
+      'input[id*="password"]',
+      '#password',
+    ].join(', ')
+
+    const SUBMIT_SELECTORS = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button.mat-raised-button',
+      'button.mat-flat-button',
+      '.login-btn',
+      '[class*="signin"]',
+      '[class*="login"]',
+    ].join(', ')
 
     try {
-      await this.page.goto(urls.base + urls.login, { waitUntil: 'networkidle', timeout: 30000 })
+      await this.logger.info('Giriş sayfası açılıyor...')
+      await this.page.goto(urls.base + urls.login, { waitUntil: 'domcontentloaded', timeout: 30000 })
+
+      // Ek bekleme — Angular SPA yüklenmesi için
+      await this.page.waitForTimeout(3000)
       await this.screenshot('01_login_page')
+      await this.logger.info(`Giriş sayfası açıldı — URL: ${this.page.url()} — Başlık: ${await this.page.title()}`)
 
-      // E-posta alanını bul ve doldur
-      await this.page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 10000 })
-      await this.humanType('input[type="email"], input[name="email"], #email', this.account.email)
+      // E-posta alanını bul
+      await this.logger.info('E-posta alanı bekleniyor...')
+      try {
+        await this.page.waitForSelector(EMAIL_SELECTORS, { timeout: 15000 })
+      } catch (err) {
+        // Hata ayıklama: sayfadaki tüm input'ları logla
+        const inputs = await this.page.evaluate(() =>
+          Array.from(document.querySelectorAll('input')).map(i => ({
+            type: i.type, name: i.name, id: i.id, formcontrolname: i.getAttribute('formcontrolname')
+          }))
+        )
+        await this.logger.error(`E-posta alanı bulunamadı. Sayfadaki input'lar: ${JSON.stringify(inputs)}`)
+        throw err
+      }
 
-      await this.humanType('input[type="password"], input[name="password"], #password', this.account.encrypted_password)
-
+      await this.logger.info('E-posta ve şifre alanları dolduruluyor...')
+      await this.humanType(EMAIL_SELECTORS, this.account.email)
+      await this.humanType(PASSWORD_SELECTORS, this.account.encrypted_password)
       await this.screenshot('02_login_filled')
 
-      // Giriş butonuna tıkla
-      await this.page.click('button[type="submit"], input[type="submit"], .login-btn, [class*="signin"]')
-      await this.page.waitForLoadState('networkidle', { timeout: 20000 })
-
+      await this.logger.info('Giriş butonuna tıklanıyor...')
+      await this.page.click(SUBMIT_SELECTORS)
+      await this.page.waitForLoadState('networkidle', { timeout: 25000 })
+      await this.page.waitForTimeout(2000)
       await this.screenshot('03_after_login')
 
-      // Giriş başarı kontrolü
-      const currentUrl = this.page.url()
+      const currentUrl  = this.page.url()
       const pageContent = await this.page.content()
+      await this.logger.info(`Giriş sonrası URL: ${currentUrl}`)
 
       const loginFailed =
         currentUrl.includes('/login') &&
-        (pageContent.includes('hatalı') || pageContent.includes('incorrect') || pageContent.includes('invalid'))
+        (pageContent.includes('hatalı') || pageContent.includes('incorrect') ||
+         pageContent.includes('invalid') || pageContent.includes('wrong'))
 
       if (loginFailed) {
-        await this.logger.error('Giriş başarısız — kullanıcı adı veya şifre hatalı.')
+        await this.logger.error('VFS girişi başarısız — kullanıcı adı veya şifre hatalı olabilir.')
         return false
       }
 
@@ -134,7 +214,7 @@ class VfsPlaywrightClient {
       return true
     } catch (err) {
       await this.screenshot('error_login')
-      await this.logger.error(`Giriş hatası: ${err.message}`)
+      await this.logger.error(`VFS giriş hatası: ${err.message}`)
       return false
     }
   }
@@ -149,11 +229,12 @@ class VfsPlaywrightClient {
     }
 
     const urls = this.getUrls()
-    await this.logger.info(`Randevu slotları kontrol ediliyor: ${this.account.country}`)
+    await this.logger.info(`Randevu sayfasına gidiliyor: ${urls.base + urls.appointment}`)
 
     try {
       await this.page.goto(urls.base + urls.appointment, { waitUntil: 'networkidle', timeout: 30000 })
       await this.screenshot('04_appointment_page')
+      await this.logger.info(`Randevu sayfası açıldı — URL: ${this.page.url()}`)
 
       // Şehir/merkez seç (varsa)
       if (this.account.city) {
@@ -176,6 +257,7 @@ class VfsPlaywrightClient {
       }
 
       await this.screenshot('05_slot_selection')
+      await this.logger.info('Randevu slotları taranıyor...')
 
       // Müsait tarihleri oku — aktif (tıklanabilir) günler
       const slots = await this.page.evaluate(() => {
@@ -204,16 +286,18 @@ class VfsPlaywrightClient {
         return results
       })
 
+      await this.logger.info(`Randevu kontrol tamamlandı — ${slots.length} slot bulundu.`)
+
       if (slots.length > 0) {
-        await this.logger.success(`${slots.length} müsait slot bulundu!`)
+        await this.logger.success(`✅ ${slots.length} müsait randevu slotu bulundu: ${slots.map(s => s.date).join(', ')}`)
       } else {
-        await this.logger.info('Şu an müsait randevu yok.')
+        await this.logger.info('Randevu bulunamadı — şu an müsait slot yok.')
       }
 
       return slots
     } catch (err) {
       await this.screenshot('error_slots')
-      await this.logger.error(`Slot kontrol hatası: ${err.message}`)
+      await this.logger.error(`Randevu kontrol hatası: ${err.message}`)
       return []
     }
   }

@@ -32,12 +32,13 @@ export default function LogsPage() {
   const fetchLogs = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     const supabase = createClient()
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('bot_logs')
-      .select('*, bots(name)')
+      .select('id, level, message, created_at, bot_id, bots(name)')
       .order('created_at', { ascending: false })
       .limit(200)
-    setLogs((data ?? []) as Log[])
+    if (error) console.error('[logs] fetch error:', error.message)
+    setLogs((data ?? []) as unknown as Log[])
     setLoading(false)
     setRefreshing(false)
   }, [])

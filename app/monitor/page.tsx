@@ -85,7 +85,7 @@ export default function MonitorPage() {
       supabase.from('bot_logs')
         .select('id, level, message, created_at, bots(name, user_id)')
         .order('created_at', { ascending: false })
-        .limit(30),
+        .limit(20),
       supabase.from('appointments')
         .select('id, country, appointment_date, appointment_time, status, created_at, bots(name)')
         .order('created_at', { ascending: false })
