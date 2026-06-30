@@ -1,4 +1,0 @@
-[ERROR] Failed to load resource: the server responded with a status of 403 ()
-[ERROR] %c%d font-size:0;color:transparent NaN
-[ERROR] %c%d font-size:0;color:transparent NaN
-[ERROR] Failed to load resource: the server responded with a status of 401 ()

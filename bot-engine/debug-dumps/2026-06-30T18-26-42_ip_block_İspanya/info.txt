@@ -1,4 +1,0 @@
-URL    : https://visa.vfsglobal.com/tur/esp/login/page-not-found
-Baslik : Sorry, we’ve been unable to progress with your request right now. Please try again in one hour on a single device, after you have closed all your browser windows, disconnected from a VPN and cleared your cache memory.
-Zaman  : 30.06.2026 21:26:42
-Label  : ip_block_İspanya

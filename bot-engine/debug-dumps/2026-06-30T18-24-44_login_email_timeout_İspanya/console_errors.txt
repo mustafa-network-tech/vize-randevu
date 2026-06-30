@@ -1,4 +1,0 @@
-[ERROR] Failed to load resource: net::ERR_FAILED
-[ERROR] Access to XMLHttpRequest at 'https://litf-api.vfsglobal.com/data/D14906B6BA614C8C97747C352AA409D1' from origin 'https://visa.vfsglobal.com' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-[ERROR] Failed to load resource: net::ERR_FAILED
-[ERROR] Failed to load resource: the server responded with a status of 403 ()
