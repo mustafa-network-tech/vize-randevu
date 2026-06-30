@@ -1,0 +1,198 @@
+{
+  "inputs": [
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": "ot-group-id-C0003",
+      "id": "ot-group-id-C0003",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": "ot-group-id-C0002",
+      "id": "ot-group-id-C0002",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": "ot-group-id-C0004",
+      "id": "ot-group-id-C0004",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "name": "vendor-search-handler",
+      "id": "vendor-search-handler",
+      "placeholder": "Aramak...",
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": null,
+      "id": "select-all-hosts-groups-handler",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": null,
+      "id": "select-all-vendor-groups-handler",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": null,
+      "id": "select-all-vendor-leg-handler",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "name": null,
+      "id": "chkbox-id",
+      "placeholder": null,
+      "formcontrolname": null,
+      "ngModel": null,
+      "visible": false
+    }
+  ],
+  "buttons": [
+    {
+      "tag": "button",
+      "type": "button",
+      "text": "- Change language to translate",
+      "classes": "btn border",
+      "visible": true
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tanımlama Bilgisi Ayarları",
+      "classes": null,
+      "visible": true
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tümünü Reddet",
+      "classes": null,
+      "visible": true
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tüm Tanımlama Bilgilerini Kabul Et",
+      "classes": null,
+      "visible": true
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": null,
+      "classes": "ot-close-icon",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tanımlama Bilgisi Ayrıntıları‎",
+      "classes": "ot-link-btn category-host-list-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tanımlama Bilgisi Ayrıntıları‎",
+      "classes": "ot-link-btn category-host-list-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tanımlama Bilgisi Ayrıntıları‎",
+      "classes": "ot-link-btn category-host-list-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tanımlama Bilgisi Ayrıntıları‎",
+      "classes": "ot-link-btn category-host-list-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Back Button",
+      "classes": "ot-link-btn back-btn-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Filter Button",
+      "classes": null,
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Clear",
+      "classes": null,
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Apply",
+      "classes": null,
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Cancel",
+      "classes": null,
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Seçimlerimi Onayla",
+      "classes": "save-preference-btn-handler onetrust-close-btn-handler",
+      "visible": false
+    },
+    {
+      "tag": "button",
+      "type": "submit",
+      "text": "Tümüne İzin Ver",
+      "classes": null,
+      "visible": false
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "selector": "input[formcontrolname=\"username\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[formcontrolname=\"email\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[formcontrolname=\"loginId\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[type=\"email\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[name=\"email\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[id*=\"email\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "#email",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[id*=\"username\"]",
+    "found": false,
+    "count": 0
+  },
+  {
+    "selector": "input[name=\"username\"]",
+    "found": false,
+    "count": 0
+  }
+]

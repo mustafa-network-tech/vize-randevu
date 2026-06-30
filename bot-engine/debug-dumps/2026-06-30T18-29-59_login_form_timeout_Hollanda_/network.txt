@@ -1,0 +1,14 @@
+[307] https://visa.vfsglobal.com/tur/en/nld/login
+[403] https://visa.vfsglobal.com/tur/en/nld/login
+[200] https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015
+[200] https://visa.vfsglobal.com/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=a13f3ce96edf5809
+[200] https://challenges.cloudflare.com/turnstile/v0/g/37d84357f321/api.js?onload=CyjyG7&render=explicit
+[204] https://visa.vfsglobal.com/cdn-cgi/rum?
+[200] https://visa.vfsglobal.com/cdn-cgi/challenge-platform/h/g/fo/16225908:1782842425:TmPi2-Xsp5HxYVptVedm0af-tLvBAPdsQAmTr5xLQuA/a13f3ce96edf5809/dA1B5i1syBBdSwIusYlzAW92H1b_HKPBVocJV3TSMdw-1782844181-1.2.1.1-4hrPOops7WKzxwIjzfnCO5hbQrS0Twcph839Y6V1P0KQt6bLNrREuPAMxTJZiGp2
+[200] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/f/av0/rch/cu6uz/0x4AAAAAAAAjq6WYeRDKmebM/light/fbE/new/normal?lang=auto
+[200] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/cmg/1
+[200] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/fo/3703810160:1782842427:f0ULPBZy2eztDNQ1bAHbzjA_syaYaMjY0GpWNOnol1k/a13f3cecbf7523a1/SHs93HBSYO9_HukwFffYkmFHwj6sXbn2LeXwirv_hRg-1782844182-1.2.1.1-oLGaDUpD3Yr8nxVZ9PQiY9Ro1O8HF60OHmePb.72BV28Is13HOQxdMdjP4utt8kc
+[401] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/pat/a13f3cecbf7523a1/1782844182823/974b9c401762b86b9ba3b51b393cea18651bcd77dc44b0c8861d0acaa5116511/JPvVxP9E8iYEH9B
+[204] https://hagen.challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/i/a13f3cecbf7523a1/SHs93HBSYO9_HukwFffYkmFHwj6sXbn2LeXwirv_hRg-1782844182-1.2.1.1-oLGaDUpD3Yr8nxVZ9PQiY9Ro1O8HF60OHmePb.72BV28Is13HOQxdMdjP4utt8kc
+[200] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/ci/a13f3cecbf7523a1/1782844182824/Mji5m6SZ0RjyZ3s
+[200] https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/fo/3703810160:1782842427:f0ULPBZy2eztDNQ1bAHbzjA_syaYaMjY0GpWNOnol1k/a13f3cecbf7523a1/SHs93HBSYO9_HukwFffYkmFHwj6sXbn2LeXwirv_hRg-1782844182-1.2.1.1-oLGaDUpD3Yr8nxVZ9PQiY9Ro1O8HF60OHmePb.72BV28Is13HOQxdMdjP4utt8kc

@@ -6,6 +6,10 @@ const { notifyAppointmentFound, notifyBotError, notifyBotStopped, sendTelegram }
 const MAX_CONSECUTIVE_ERRORS = 5
 const runningBots = new Set()
 
+// IP engeli yaşayan botlar ve ne zaman tekrar denenebileceği
+// { botId: timestamp }
+const ipBlockedUntil = new Map()
+
 const C = { cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', dim: '\x1b[2m', reset: '\x1b[0m' }
 
 async function runBot(bot) {
@@ -14,6 +18,14 @@ async function runBot(bot) {
   const supabase = getSupabase()
   const logger   = createLogger(bot.id, bot.name)
   const account  = bot.visa_accounts
+
+  // IP engeli kontrolü
+  const blockedUntil = ipBlockedUntil.get(bot.id)
+  if (blockedUntil && Date.now() < blockedUntil) {
+    const remainMin = Math.ceil((blockedUntil - Date.now()) / 60000)
+    console.log(`\x1b[2m[runner] ${bot.name} IP engeli nedeniyle ${remainMin} dk daha bekliyor...\x1b[0m`)
+    return
+  }
 
   runningBots.add(bot.id)
 
@@ -48,6 +60,19 @@ async function runBot(bot) {
     // ── 2. Slot kontrolü (login + sayfa açma + parse) ──
     await logger.info(`VFS giriş deneniyor: ${account?.email ?? '?'}`)
     const slots = await client.checkSlots()
+
+    // IP engeli tespit edildi → botu 65 dakika askıya al
+    if (client._ipBlocked) {
+      const unblockAt = Date.now() + 65 * 60 * 1000
+      ipBlockedUntil.set(bot.id, unblockAt)
+      const unblockTime = new Date(unblockAt).toLocaleTimeString('tr-TR')
+      console.log(`${C.red}[runner] ${bot.name} IP engeli — ${unblockTime}'e kadar askıya alındı.${C.reset}`)
+      await logger.warning(`IP engeli: bot ${unblockTime}'e kadar duraklatıldı. Proxy kullanmanız önerilir.`)
+      await supabase.from('bots').update({ status: 'paused' }).eq('id', bot.id)
+      runningBots.delete(bot.id)
+      await client.close()
+      return
+    }
 
     // ── 3. Sonuç ───────────────────────────────────────
     if (slots.length === 0) {
@@ -183,13 +208,27 @@ async function runCycle() {
   }
 
   const now = Date.now()
-  await Promise.allSettled(
-    bots.map(async bot => {
-      const intervalMs = (bot.check_interval ?? 60) * 1000
-      const lastRun    = bot.last_run ? new Date(bot.last_run).getTime() : 0
-      if (now - lastRun >= intervalMs) await runBot(bot)
-    })
-  )
+  const pending = bots.filter(bot => {
+    const intervalMs = (bot.check_interval ?? 60) * 1000
+    const lastRun    = bot.last_run ? new Date(bot.last_run).getTime() : 0
+    return now - lastRun >= intervalMs
+  })
+
+  if (pending.length === 0) return
+
+  console.log(`\n\x1b[2m[runner] ${pending.length} bot sırayla çalıştırılacak (IP engeli önlemi)\x1b[0m`)
+
+  // Botları sıralı çalıştır — aynı anda tek bot VFS'ye bağlansın
+  for (let i = 0; i < pending.length; i++) {
+    const bot = pending[i]
+    await runBot(bot)
+    // Son bot değilse araya 5–10 saniye bekle (rate limiting önlemi)
+    if (i < pending.length - 1) {
+      const wait = 5000 + Math.floor(Math.random() * 5000)
+      console.log(`\x1b[2m[runner] Sonraki bot için ${(wait / 1000).toFixed(1)}s bekleniyor...\x1b[0m`)
+      await new Promise(r => setTimeout(r, wait))
+    }
+  }
 }
 
 module.exports = { runCycle, runBot }
