@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Bot, Globe, FileText, CalendarCheck,
   ScrollText, Users, Settings, ChevronRight, Zap, X,
   Shield, Fingerprint, CalendarDays, BarChart3, Bell, UserCog,
-  LogOut, UserCheck, Crown, MonitorPlay,
+  LogOut, UserCheck, Crown, MonitorPlay, User,
 } from 'lucide-react'
 
 // adminOnly: true → sadece admin görür
@@ -55,6 +55,7 @@ const NAV_SECTIONS = [
       { name: 'Loglar',      href: '/logs',          icon: ScrollText,     adminOnly: false },
       { name: 'Personel',    href: '/users',         icon: UserCog,        adminOnly: true  },
       { name: 'Ayarlar',     href: '/settings',      icon: Settings,       adminOnly: false },
+      { name: 'Profilim',    href: '/profile',        icon: User,           adminOnly: false },
     ],
   },
 ]
