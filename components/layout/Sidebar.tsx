@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Bot, Globe, FileText, CalendarCheck,
   ScrollText, Users, Settings, ChevronRight, Zap, X,
   Shield, Fingerprint, CalendarDays, BarChart3, Bell, UserCog,
-  LogOut,
+  LogOut, UserCheck,
 } from 'lucide-react'
 
 const NAV_SECTIONS = [
@@ -33,6 +33,7 @@ const NAV_SECTIONS = [
       { name: 'Başvurular',  href: '/applications',icon: FileText        },
       { name: 'Randevular',  href: '/appointments',icon: CalendarCheck   },
       { name: 'Hesaplar',    href: '/accounts',    icon: Users           },
+      { name: 'Başvuranlar', href: '/applicants',  icon: UserCheck       },
     ],
   },
   {

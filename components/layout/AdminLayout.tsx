@@ -20,6 +20,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   '/notifications': { title: 'Bildirim Merkezi',     subtitle: 'Kanal yapılandırması ve uyarı tercihleri'          },
   '/users':         { title: 'Personel Yönetimi',    subtitle: 'Kullanıcı rolleri ve erişim yetkileri'             },
   '/settings':      { title: 'Sistem Ayarları',      subtitle: 'Yapılandırma, güvenlik ve yedekleme ayarları'      },
+  '/applicants':    { title: 'Başvuranlar',           subtitle: 'Otomatik rezervasyon için pasaport ve kişisel bilgiler' },
 }
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

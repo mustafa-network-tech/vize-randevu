@@ -1,94 +1,136 @@
-const { getSupabase } = require('./supabase')
-const { VfsClient } = require('./vfs-client')
-const { createLogger } = require('./logger')
-const { notifyAppointmentFound, notifyBotError, notifyBotStopped } = require('./notifier')
+const { getSupabase }           = require('./supabase')
+const { VfsPlaywrightClient }   = require('./vfs-playwright-client')
+const { createLogger }          = require('./logger')
+const { notifyAppointmentFound, notifyBotError, notifyBotStopped, sendTelegram } = require('./notifier')
 
-// Kaç ardı ardına hata olunca bot durdurulsun
 const MAX_CONSECUTIVE_ERRORS = 5
-
-// Çalışan botları takip et (tekrar başlatmayı önlemek için)
 const runningBots = new Set()
 
 /**
- * Tek bir botu çalıştırır: giriş yap, slotları kontrol et, sonuçları kaydet.
+ * Tek bir botu çalıştırır:
+ * 1. Playwright ile VFS'ye giriş yap
+ * 2. Slotları kontrol et
+ * 3. Slot bulunduysa DB'ye yaz ve bildirim gönder
+ * 4. auto_book = true ise başvuran bilgileriyle randevu al
  */
 async function runBot(bot) {
-  if (runningBots.has(bot.id)) return  // zaten çalışıyor
+  if (runningBots.has(bot.id)) return
 
-  const supabase   = getSupabase()
-  const logger     = createLogger(bot.id)
-  const vfsClient  = new VfsClient(bot.visa_accounts, logger)
-  let   errorCount = 0
+  const supabase  = getSupabase()
+  const logger    = createLogger(bot.id)
+  const account   = bot.visa_accounts
 
   runningBots.add(bot.id)
-
-  // Son çalışma zamanını güncelle
   await supabase.from('bots').update({ last_run: new Date().toISOString() }).eq('id', bot.id)
+  await logger.info(`Bot başlatıldı: ${bot.name} — ${account?.country ?? '?'} / ${account?.email ?? '?'}`)
 
-  await logger.info(`Bot başlatıldı: ${bot.name} (${bot.visa_accounts?.country ?? '?'})`)
+  const notifyFn = async (title, message) => {
+    await sendTelegram(`<b>${title}</b>\n${message}`)
+    await supabase.from('notifications').insert({ user_id: bot.user_id, type: 'warning', title, message, is_read: false })
+  }
+
+  const client = new VfsPlaywrightClient(account, logger, notifyFn)
 
   try {
-    const slots = await vfsClient.checkSlots()
+    await client.launch()
+    const slots = await client.checkSlots()
 
-    if (slots.length > 0) {
-      // Bulunan randevuları appointments tablosuna yaz
-      const appointmentRows = slots.map(slot => ({
-        bot_id:           bot.id,
-        country:          bot.visa_accounts?.country ?? 'Bilinmiyor',
-        city:             bot.visa_accounts?.city ?? null,
-        center:           slot.center ?? bot.visa_accounts?.visa_center ?? null,
-        visa_type:        bot.visa_accounts?.visa_type ?? null,
-        appointment_date: slot.date,
-        appointment_time: slot.time ?? null,
-        status:           'available',
-      }))
+    if (slots.length === 0) {
+      runningBots.delete(bot.id)
+      await client.close()
+      return
+    }
 
-      const { error: insertErr } = await supabase.from('appointments').upsert(appointmentRows, {
-        onConflict: 'bot_id,appointment_date,appointment_time',
-        ignoreDuplicates: true,
-      })
+    // Bulunan slotları DB'ye kaydet
+    const rows = slots.map(slot => ({
+      bot_id:           bot.id,
+      country:          account?.country ?? 'Bilinmiyor',
+      city:             account?.city ?? null,
+      center:           slot.center ?? account?.visa_center ?? null,
+      visa_type:        account?.visa_type ?? null,
+      appointment_date: slot.date,
+      appointment_time: slot.time ?? null,
+      status:           'available',
+    }))
 
-      if (!insertErr) {
-        for (const slot of slots) {
-          await notifyAppointmentFound(
-            bot.user_id,
-            bot.name,
-            bot.visa_accounts?.country,
-            slot.date,
-            slot.time,
-            slot.center ?? bot.visa_accounts?.visa_center,
+    await supabase.from('appointments').upsert(rows, {
+      onConflict: 'bot_id,appointment_date,appointment_time',
+      ignoreDuplicates: true,
+    })
+
+    // Bildirim gönder
+    for (const slot of slots) {
+      await notifyAppointmentFound(bot.user_id, bot.name, account?.country, slot.date, slot.time, slot.center ?? account?.visa_center)
+    }
+
+    // Otomatik rezervasyon
+    if (bot.auto_book) {
+      await logger.info('Otomatik rezervasyon etkin — başvuran bilgileri alınıyor...')
+
+      const { data: applicants } = await supabase
+        .from('applicants')
+        .select('*')
+        .eq('user_id', bot.user_id)
+        .eq('is_active', true)
+        .order('priority', { ascending: true })
+        .limit(1)
+
+      if (!applicants || applicants.length === 0) {
+        await logger.warning('Otomatik rezervasyon için başvuran bilgisi bulunamadı. /applicants sayfasından ekleyin.')
+        await notifyFn(
+          '⚠️ Başvuran Bilgisi Eksik',
+          `${bot.name} botu randevu buldu ama başvuran bilgisi kayıtlı değil.\nPanelden başvuran ekleyin.`
+        )
+      } else {
+        const applicant = applicants[0]
+        const result = await client.bookAppointment(slots[0], applicant)
+
+        if (result.success) {
+          // Randevuyu "booked" olarak işaretle
+          await supabase.from('appointments')
+            .update({ status: 'booked' })
+            .eq('bot_id', bot.id)
+            .eq('appointment_date', slots[0].date)
+
+          await supabase.from('notifications').insert({
+            user_id: bot.user_id,
+            type: 'success',
+            title: `✅ Randevu Alındı! — ${account?.country}`,
+            message: `${applicant.full_name} için ${slots[0].date} ${slots[0].time ?? ''} tarihli randevu başarıyla alındı.${result.reference ? ` Referans: ${result.reference}` : ''}`,
+            is_read: false,
+          })
+
+          await sendTelegram(
+            `<b>✅ RANDEVU ALINDI!</b>\n` +
+            `Kişi: ${applicant.full_name}\n` +
+            `Ülke: ${account?.country}\n` +
+            `Tarih: ${slots[0].date} ${slots[0].time ?? ''}\n` +
+            (result.reference ? `Referans: ${result.reference}` : '')
           )
         }
       }
-
-      // Otomatik rezervasyon açıksa işaretle
-      if (bot.auto_book && slots.length > 0) {
-        await logger.info('Otomatik rezervasyon etkin — ilk uygun slot rezerve ediliyor...')
-        // TODO: VFS rezervasyon POST isteği — ülkeye göre özelleştirin
-      }
-
-      errorCount = 0
     }
   } catch (err) {
-    errorCount++
-    await logger.error(`Çalışma hatası (${errorCount}/${MAX_CONSECUTIVE_ERRORS}): ${err.message}`)
+    await logger.error(`Beklenmedik hata: ${err.message}`)
     await notifyBotError(bot.user_id, bot.name, err.message)
 
+    // Ardı ardına hata sayacı
+    const { data: currentBot } = await supabase.from('bots').select('error_count').eq('id', bot.id).single()
+    const errorCount = (currentBot?.error_count ?? 0) + 1
+    await supabase.from('bots').update({ error_count: errorCount }).eq('id', bot.id)
+
     if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
-      await supabase.from('bots').update({ status: 'error' }).eq('id', bot.id)
-      await notifyBotStopped(bot.user_id, bot.name, `${MAX_CONSECUTIVE_ERRORS} ardı ardına hata — bot durduruldu.`)
-      runningBots.delete(bot.id)
-      return
+      await supabase.from('bots').update({ status: 'error', error_count: 0 }).eq('id', bot.id)
+      await notifyBotStopped(bot.user_id, bot.name, `${MAX_CONSECUTIVE_ERRORS} ardı ardına hata oluştu — bot durduruldu.`)
     }
   } finally {
-    await vfsClient.logout()
+    await client.close()
     runningBots.delete(bot.id)
   }
 }
 
 /**
  * Tüm çalışan botların bir döngü turunu gerçekleştirir.
- * Scheduler bunu periyodik olarak çağırır.
  */
 async function runCycle() {
   const supabase = getSupabase()
@@ -97,14 +139,9 @@ async function runCycle() {
     .select('*, visa_accounts(email, encrypted_password, country, city, visa_center, visa_type, provider)')
     .eq('status', 'running')
 
-  if (error) {
-    console.error('[runner] Bot listesi alınamadı:', error.message)
-    return
-  }
-
+  if (error) { console.error('[runner] Bot listesi alınamadı:', error.message); return }
   if (!bots || bots.length === 0) return
 
-  // Botları paralel çalıştır — her birinin kendi check_interval'ına göre
   const now = Date.now()
   const promises = bots.map(async bot => {
     const intervalMs = (bot.check_interval ?? 60) * 1000
