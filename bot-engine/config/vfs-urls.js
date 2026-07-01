@@ -161,13 +161,30 @@ function getVfsConfig(countryName) {
  *
  * @param {string} url      - page.url()
  * @param {string} title    - await page.title()
- * @returns {{ valid: boolean, reason: string }}
+ * @param {string} content  - await page.content()  (opsiyonel)
+ * @returns {{ valid: boolean, reason: string, isIpBlock: boolean }}
  */
-function validateLoginPage(url, title) {
-  const u = (url   ?? '').toLowerCase()
-  const t = (title ?? '').toLowerCase()
+function validateLoginPage(url, title, content = '') {
+  const u = (url     ?? '').toLowerCase()
+  const t = (title   ?? '').toLowerCase()
+  const c = (content ?? '').toLowerCase()
 
-  // IP engeli — başlıkta kontrol (URL'den önce, daha spesifik)
+  // ── İçerik tabanlı IP/bot engeli (JSON hata cevabı) ────────────────
+  // VFS 403201, 403, 429 gibi JSON yanıtlar döndürür
+  if (
+    c.includes('"code": "403') ||
+    c.includes('"code":"403') ||
+    c.includes('"code": "429') ||
+    c.includes('"code":"429') ||
+    c.includes('"code": "401') ||
+    c.includes('"code":"401')
+  ) {
+    const codeMatch = content.match(/"code"\s*:\s*"(\d+)"/)
+    const code = codeMatch ? codeMatch[1] : '40x'
+    return { valid: false, isIpBlock: true, reason: `VFS API engeli: HTTP ${code} — IP engeli veya oran sınırı` }
+  }
+
+  // ── IP engeli — başlıkta kontrol ────────────────────────────────────
   if (
     t.includes('unable to progress') ||
     t.includes('try again in one hour') ||
@@ -175,23 +192,26 @@ function validateLoginPage(url, title) {
     t.includes('disconnected from a vpn') ||
     t.includes('cleared your cache')
   ) {
-    return { valid: false, reason: 'IP engeli: VFS "1 saat bekleyin" mesajı gösteriyor' }
+    return { valid: false, isIpBlock: true, reason: 'IP engeli: VFS "1 saat bekleyin" mesajı gösteriyor' }
   }
 
+  // ── URL tabanlı kontroller ───────────────────────────────────────────
   if (u.includes('page-not-found')) {
-    return { valid: false, reason: 'URL page-not-found içeriyor — IP engeli veya geçersiz rota' }
+    return { valid: false, isIpBlock: true, reason: 'URL page-not-found içeriyor — IP engeli veya geçersiz rota' }
   }
   if (u.includes('/error') || u.includes('/blocked')) {
-    return { valid: false, reason: 'URL hata/engel içeriyor' }
-  }
-  if (t.includes('page not found') || t.includes('404')) {
-    return { valid: false, reason: 'Sayfa bulunamadı (404)' }
-  }
-  if (t.includes('access denied') || t.includes('forbidden')) {
-    return { valid: false, reason: 'Erişim engellendi (403)' }
+    return { valid: false, isIpBlock: false, reason: 'URL hata/engel içeriyor' }
   }
 
-  return { valid: true, reason: 'OK' }
+  // ── Başlık tabanlı kontroller ────────────────────────────────────────
+  if (t.includes('page not found') || t.includes('404')) {
+    return { valid: false, isIpBlock: false, reason: 'Sayfa bulunamadı (404)' }
+  }
+  if (t.includes('access denied') || t.includes('forbidden')) {
+    return { valid: false, isIpBlock: true, reason: 'Erişim engellendi (403)' }
+  }
+
+  return { valid: true, isIpBlock: false, reason: 'OK' }
 }
 
 /**

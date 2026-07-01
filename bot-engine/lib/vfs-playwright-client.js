@@ -324,12 +324,12 @@ class VfsPlaywrightClient {
         await this.logger.info(`Sayfa açıldı — URL: ${loadedUrl}`)
         await this.logger.info(`Sayfa başlığı: ${loadedTitle}`)
 
-        // ── 2. URL / başlık doğrula ───────────────────────────
-        const { valid, reason } = validateLoginPage(loadedUrl, loadedTitle)
+        // ── 2. Sayfa içeriği + URL / başlık doğrulama ────────
+        const pageContent = await this.page.content().catch(() => '')
+        const { valid, reason, isIpBlock } = validateLoginPage(loadedUrl, loadedTitle, pageContent)
         if (!valid) {
-          const isIpBlock = reason.toLowerCase().includes('ip engeli') || reason.toLowerCase().includes('1 saat')
           await this.logger.error(isIpBlock
-            ? `IP engeli tespit edildi: ${reason}. Bot 65 dakika askıya alınıyor.`
+            ? `IP engeli / bot engeli tespit edildi: ${reason}. Bot 65 dakika askıya alınıyor.`
             : `Geçersiz VFS sayfası: ${reason} — URL: ${loadedUrl}`)
           await captureDump(this.page, isIpBlock ? `ip_block_${countrySlug}` : `bad_url_${countrySlug}`, this._consoleErrors, this._networkResponses, []).catch(() => {})
           if (isIpBlock) this._ipBlocked = true
@@ -337,7 +337,6 @@ class VfsPlaywrightClient {
         }
 
         // ── 3. Session Expired kontrolü ───────────────────────
-        const pageContent = await this.page.content().catch(() => '')
         if (isSessionExpired(loadedUrl, loadedTitle, pageContent)) {
           await this.screenshot(`session_expired_attempt${attempt}`)
           if (attempt === 2) {
