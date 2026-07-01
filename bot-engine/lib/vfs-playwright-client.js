@@ -184,64 +184,18 @@ class VfsPlaywrightClient {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Tüm iframe'leri tarayarak giriş formunu arar, bulduklarını loglar
+  // Selector listesini tek tek deneyerek ilk bulunanı döndürür.
+  // Hem sayfa (this.page) hem de belirtilen frame içinde arar.
   // ─────────────────────────────────────────────────────────────────────────
-  async _searchIframesForLoginForm() {
-    await this.logger.info('[iframe] Ana DOM\'da form bulunamadı — iframe\'ler taranıyor...')
-    const frames = this.page.frames()
-    await this.logger.info(`[iframe] Toplam frame sayısı: ${frames.length}`)
-
-    const IFRAME_SELECTORS = [
-      'input[type="email"]',
-      'input[type="password"]',
-      'input[name="email"]',
-      'input[name="password"]',
-      'input[name="username"]',
-      'input[formcontrolname="username"]',
-      'input[formcontrolname="password"]',
-      'input[id*="email"]',
-      'input[id*="password"]',
-    ]
-
-    let foundFrame = null
-    let foundEmailSel = null
-    let foundPasswordSel = null
-
-    for (const frame of frames) {
-      const frameUrl = frame.url()
-      if (frameUrl === 'about:blank' || frameUrl === '') continue
-
-      await this.logger.info(`[iframe] Frame inceleniyor: ${frameUrl}`)
-
-      const found = []
-      for (const sel of IFRAME_SELECTORS) {
-        try {
-          const el = await frame.$(sel)
-          if (el) {
-            found.push(sel)
-            await this.logger.info(`[iframe]   ✓ Bulundu: "${sel}" — frame: ${frameUrl}`)
-          }
-        } catch (_) {}
-      }
-
-      if (found.length > 0) {
-        // Email ve password selector'larını ayır
-        const emailSel = found.find(s =>
-          s.includes('email') || s.includes('username') || s.includes('"email"')
-        ) ?? null
-        const pwSel = found.find(s => s.includes('password')) ?? null
-
-        if (emailSel || pwSel) {
-          foundFrame     = frame
-          foundEmailSel  = emailSel
-          foundPasswordSel = pwSel
-          await this.logger.info(`[iframe] ✅ Giriş formu bulundu — frame: ${frameUrl}`)
-          break
-        }
-      }
+  async _findSelector(selectorList, context = null) {
+    const ctx = context ?? this.page
+    for (const sel of selectorList) {
+      try {
+        const el = await ctx.$(sel)
+        if (el) return sel
+      } catch (_) {}
     }
-
-    return { frame: foundFrame, emailSel: foundEmailSel, passwordSel: foundPasswordSel }
+    return null
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -259,33 +213,37 @@ class VfsPlaywrightClient {
 
     await this.logger.info(`VFS giriş deneniyor: ${this.account.email}`)
 
-    const EMAIL_SELECTORS = [
-      'input[formcontrolname="username"]',
-      'input[formcontrolname="email"]',
-      'input[formcontrolname="loginId"]',
+    // Email selector'ları — öncelik sırasına göre tek tek denenir
+    const EMAIL_SELECTOR_LIST = [
       'input[type="email"]',
       'input[name="email"]',
       'input[id*="email"]',
-      '#email',
-      'input[id*="username"]',
+      'input[type="text"]',
+      'input[autocomplete="username"]',
+      'input[formcontrolname="username"]',
+      'input[formcontrolname="email"]',
+      'input[formcontrolname="loginId"]',
       'input[name="username"]',
-    ].join(', ')
+      'input[id*="username"]',
+      '#email',
+    ]
 
-    const PASSWORD_SELECTORS = [
-      'input[formcontrolname="password"]',
+    // Password selector'ları
+    const PASSWORD_SELECTOR_LIST = [
       'input[type="password"]',
       'input[name="password"]',
       'input[id*="password"]',
+      'input[formcontrolname="password"]',
       '#password',
-    ].join(', ')
+    ]
 
-    const SUBMIT_SELECTORS = [
+    const SUBMIT_SELECTOR_LIST = [
       'button[type="submit"]',
       'button.mat-raised-button',
       'button.mat-flat-button',
       'input[type="submit"]',
       '.login-btn',
-    ].join(', ')
+    ]
 
     const countrySlug = (this.account.country ?? 'unknown').replace(/\s/g, '_')
 
@@ -297,7 +255,7 @@ class VfsPlaywrightClient {
       }
 
       try {
-        // ── 1. Ana sayfa → login sayfası ─────────────────
+        // ── 1. Ana sayfa → networkidle → çerez → login URL ───
         await this._navigateToLogin(cfg)
 
         const loadedUrl   = this.page.url()
@@ -305,20 +263,19 @@ class VfsPlaywrightClient {
         await this.logger.info(`Sayfa açıldı — URL: ${loadedUrl}`)
         await this.logger.info(`Sayfa başlığı: ${loadedTitle}`)
 
-        // ── 2. URL / başlık doğrula ───────────────────────
+        // ── 2. URL / başlık doğrula ───────────────────────────
         const { valid, reason } = validateLoginPage(loadedUrl, loadedTitle)
         if (!valid) {
           const isIpBlock = reason.toLowerCase().includes('ip engeli') || reason.toLowerCase().includes('1 saat')
-          const logMsg = isIpBlock
+          await this.logger.error(isIpBlock
             ? `IP engeli tespit edildi: ${reason}. Bot 65 dakika askıya alınıyor.`
-            : `Geçersiz VFS sayfası: ${reason} — URL: ${loadedUrl}`
-          await this.logger.error(logMsg)
+            : `Geçersiz VFS sayfası: ${reason} — URL: ${loadedUrl}`)
           await captureDump(this.page, isIpBlock ? `ip_block_${countrySlug}` : `bad_url_${countrySlug}`, this._consoleErrors, this._networkResponses, []).catch(() => {})
           if (isIpBlock) this._ipBlocked = true
           return false
         }
 
-        // ── 3. Session Expired kontrolü ───────────────────
+        // ── 3. Session Expired kontrolü ───────────────────────
         const pageContent = await this.page.content().catch(() => '')
         if (isSessionExpired(loadedUrl, loadedTitle, pageContent)) {
           await this.screenshot(`session_expired_attempt${attempt}`)
@@ -327,77 +284,110 @@ class VfsPlaywrightClient {
             this._loginFailed = true
             return false
           }
-          // 1. denemede → retry yapılacak (döngü devam eder)
           continue
         }
 
-        // ── 4. Form bekleniyor ────────────────────────────
-        await this.logger.info('Login formu bekleniyor...')
-        let useFrame = null       // null → ana sayfa, Frame → iframe içinde
-        let emailSel  = EMAIL_SELECTORS
-        let pwSel     = PASSWORD_SELECTORS
-        let submitSel = SUBMIT_SELECTORS
+        // ── 4. Form Tespiti ───────────────────────────────────
+        await this.logger.info('[form] Login formu aranıyor...')
 
-        const formFoundInMain = await this.page.$(EMAIL_SELECTORS).then(el => !!el).catch(() => false)
+        let foundEmailSel  = null
+        let foundPwSel     = null
+        let foundSubmitSel = null
+        let formFrame      = null   // null = ana sayfa, Frame = iframe
 
-        if (!formFoundInMain) {
-          // Ana DOM'da form yok — networkidle + ek bekleme + tekrar dene
-          await this.logger.info('Form henüz yüklenmedi, ek 3s bekleniyor ve DOM yeniden taranıyor...')
-          await this.page.waitForTimeout(3000)
+        // 4-A. Ana DOM'da email ara
+        foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
+        if (foundEmailSel) {
+          await this.logger.info(`[form] ✓ Email alanı bulundu: "${foundEmailSel}"`)
+        } else {
+          // 4-B. Bulunamadı → page.reload() + networkidle + tekrar ara
+          await this.logger.info('[form] Email alanı bulunamadı — sayfa yenileniyor...')
+          await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
+          try {
+            await this.page.waitForLoadState('networkidle', { timeout: 12000 })
+          } catch (_) {}
+          await this.page.waitForTimeout(2000)
+          await this.screenshot('01b_after_reload')
 
-          const formFoundAfterWait = await this.page.$(EMAIL_SELECTORS).then(el => !!el).catch(() => false)
+          foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
+          if (foundEmailSel) {
+            await this.logger.info(`[form] ✓ Reload sonrası email alanı bulundu: "${foundEmailSel}"`)
+          } else {
+            // 4-C. Hâlâ yok → screenshot + HTML dump + iframe tara
+            await this.logger.warning('[form] Ana DOM\'da form bulunamadı — screenshot + HTML + iframe taraması başlıyor...')
+            await this.screenshot(`form_not_found_${countrySlug}_attempt${attempt}`)
 
-          if (!formFoundAfterWait) {
-            // Session expired kontrolü
-            const content2 = await this.page.content().catch(() => '')
-            if (isSessionExpired(this.page.url(), await this.page.title().catch(() => ''), content2)) {
-              await this.screenshot(`session_expired_form_attempt${attempt}`)
-              if (attempt === 2) {
-                await this.logger.error('[session] Session Expired: form bulunamadı, 2. deneme de başarısız.')
-                this._loginFailed = true
-                return false
+            // HTML dump
+            try {
+              const html     = await this.page.content()
+              const htmlPath = path.join(SCREENSHOT_DIR, `${Date.now()}_form_notfound_${countrySlug}.html`)
+              fs.writeFileSync(htmlPath, html, 'utf8')
+              await this.logger.info(`[form] HTML dump: ${htmlPath}`)
+            } catch (_) {}
+
+            // Tüm iframe URL'lerini logla ve form ara
+            const frames = this.page.frames()
+            await this.logger.info(`[form] Toplam frame: ${frames.length}`)
+
+            for (const frame of frames) {
+              const fUrl = frame.url()
+              await this.logger.info(`[frame] URL: ${fUrl || '(boş)'}`)
+              if (!fUrl || fUrl === 'about:blank') continue
+
+              // Bu frame'de email selector'ı ara
+              const fEmail = await this._findSelector(EMAIL_SELECTOR_LIST, frame)
+              if (fEmail) {
+                await this.logger.info(`[frame] ✓ Email alanı bulundu: "${fEmail}" — frame: ${fUrl}`)
+                foundEmailSel = fEmail
+                formFrame     = frame
+                break
               }
-              continue
             }
 
-            // iframe taraması
-            const iframeResult = await this._searchIframesForLoginForm()
-            if (iframeResult.frame && (iframeResult.emailSel || iframeResult.passwordSel)) {
-              useFrame  = iframeResult.frame
-              emailSel  = iframeResult.emailSel  ?? EMAIL_SELECTORS
-              pwSel     = iframeResult.passwordSel ?? PASSWORD_SELECTORS
-              await this.logger.info('[iframe] Form iframe içinde bulundu — iframe bağlamında devam ediliyor.')
-            } else {
-              // Hiçbir yerde bulunamadı → dump al + hata fırlat
-              await this.logger.error('Login formu hiçbir yerde bulunamadı — debug dump alınıyor...')
-              await captureDump(this.page, `login_form_notfound_${countrySlug}_attempt${attempt}`, this._consoleErrors, this._networkResponses, EMAIL_SELECTORS.split(', '))
-              if (attempt === 2) {
-                this._loginFailed = true
-                return false
-              }
-              continue  // 1. denemede retry
+            if (!foundEmailSel) {
+              await this.logger.error('[form] Hiçbir frame\'de login formu bulunamadı.')
+              if (attempt === 2) { this._loginFailed = true; return false }
+              continue
             }
           }
         }
 
-        // ── 5. Form doldur ve giriş yap ───────────────────
-        await this.logger.info('E-posta ve şifre dolduruluyor...')
-        if (useFrame) {
-          // iframe bağlamında doldur
-          await useFrame.fill(emailSel, this.account.email)
-          await this.page.waitForTimeout(300 + Math.random() * 300)
-          await useFrame.fill(pwSel, this.account.encrypted_password)
+        // 4-D. Password selector'ı bul
+        foundPwSel = await this._findSelector(PASSWORD_SELECTOR_LIST, formFrame)
+        if (foundPwSel) {
+          await this.logger.info(`[form] ✓ Password alanı bulundu: "${foundPwSel}"`)
         } else {
-          await this.humanType(emailSel, this.account.email)
-          await this.humanType(pwSel,    this.account.encrypted_password)
+          await this.logger.warning('[form] Password alanı bulunamadı — devam ediliyor.')
+        }
+
+        // 4-E. Submit selector'ı bul
+        foundSubmitSel = await this._findSelector(SUBMIT_SELECTOR_LIST, formFrame)
+        if (foundSubmitSel) {
+          await this.logger.info(`[form] ✓ Submit butonu bulundu: "${foundSubmitSel}"`)
+        } else {
+          await this.logger.warning('[form] Submit butonu bulunamadı — klavye Enter kullanılacak.')
+        }
+
+        // ── 5. Form doldur ve giriş yap ───────────────────────
+        await this.logger.info('E-posta ve şifre dolduruluyor...')
+        const ctx = formFrame ?? this.page
+
+        if (formFrame) {
+          await ctx.fill(foundEmailSel, this.account.email)
+          await this.page.waitForTimeout(400 + Math.random() * 400)
+          if (foundPwSel) await ctx.fill(foundPwSel, this.account.encrypted_password)
+        } else {
+          await this.humanType(foundEmailSel, this.account.email)
+          if (foundPwSel) await this.humanType(foundPwSel, this.account.encrypted_password)
         }
         await this.screenshot('02_login_filled')
 
         await this.logger.info('Giriş butonuna tıklanıyor...')
-        if (useFrame) {
-          await useFrame.click(submitSel).catch(() => {})
+        if (foundSubmitSel) {
+          await ctx.click(foundSubmitSel)
         } else {
-          await this.page.click(submitSel)
+          // Submit butonu yoksa Enter tuşuna bas
+          await ctx.press(foundPwSel ?? foundEmailSel, 'Enter')
         }
         await this.page.waitForLoadState('networkidle', { timeout: 25000 })
         await this.page.waitForTimeout(2000)
