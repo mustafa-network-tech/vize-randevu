@@ -245,6 +245,85 @@ class VfsPlaywrightClient {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // DOM Teşhisi — mevcut sayfa durumunu loglar, input sayısını döndürür
+  // ─────────────────────────────────────────────────────────────────────────
+  async _diagnoseDom(label = '') {
+    try {
+      const info = await this.page.evaluate(() => ({
+        readyState:   document.readyState,
+        bodyLen:      document.body ? document.body.innerHTML.length : 0,
+        inputs:       document.querySelectorAll('input').length,
+        forms:        document.querySelectorAll('form').length,
+        iframes:      document.querySelectorAll('iframe').length,
+        title:        document.title,
+        href:         location.href,
+        hasNuxt:      typeof window.__NUXT__ !== 'undefined',
+        hasInitState: typeof window.__INITIAL_STATE__ !== 'undefined',
+        hasNextData:  typeof window.__NEXT_DATA__ !== 'undefined',
+      }))
+
+      const prefix = label ? `[diag:${label}]` : '[diag]'
+      await this.logger.info(
+        `${prefix} readyState=${info.readyState} | ` +
+        `bodyLen=${info.bodyLen} | inputs=${info.inputs} | ` +
+        `forms=${info.forms} | iframes=${info.iframes}`
+      )
+      await this.logger.info(
+        `${prefix} title="${info.title}" | href=${info.href}`
+      )
+
+      const frameworks = []
+      if (info.hasNuxt)      frameworks.push('Nuxt (__NUXT__)')
+      if (info.hasInitState) frameworks.push('__INITIAL_STATE__')
+      if (info.hasNextData)  frameworks.push('Next.js (__NEXT_DATA__)')
+      if (frameworks.length > 0) {
+        await this.logger.info(`${prefix} Framework tespit edildi: ${frameworks.join(', ')}`)
+      } else {
+        await this.logger.info(`${prefix} Bilinen framework objesi bulunamadı (Nuxt/Next/Initial yok)`)
+      }
+
+      return info.inputs
+    } catch (err) {
+      await this.logger.warning(`[diag] evaluate hatası: ${err.message}`)
+      return -1
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MutationObserver ile 20 sn boyunca DOM'a input eklenmesini bekler.
+  // input oluşursa resolve({ appeared: true }), timeout → resolve({ appeared: false })
+  // ─────────────────────────────────────────────────────────────────────────
+  async _waitForInputViaMutation(timeoutMs = 20000) {
+    try {
+      const appeared = await this.page.evaluate((ms) => {
+        return new Promise((resolve) => {
+          if (document.querySelectorAll('input').length > 0) {
+            resolve(true)
+            return
+          }
+          const timer = setTimeout(() => {
+            observer.disconnect()
+            resolve(false)
+          }, ms)
+
+          const observer = new MutationObserver(() => {
+            if (document.querySelectorAll('input').length > 0) {
+              clearTimeout(timer)
+              observer.disconnect()
+              resolve(true)
+            }
+          })
+          observer.observe(document.documentElement, { childList: true, subtree: true })
+        })
+      }, timeoutMs)
+      return appeared
+    } catch (err) {
+      await this.logger.warning(`[mutation] Observer hatası: ${err.message}`)
+      return false
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Selector listesini tek tek deneyerek ilk bulunanı döndürür.
   // Hem sayfa (this.page) hem de belirtilen frame içinde arar.
   // ─────────────────────────────────────────────────────────────────────────
@@ -367,41 +446,77 @@ class VfsPlaywrightClient {
         let foundSubmitSel = null
         let formFrame      = null   // null = ana sayfa, Frame = iframe
 
-        // 5-A. Ana DOM'da email ara
+        // 5-A. İlk DOM teşhisi
+        let inputCount = await this._diagnoseDom('ilk')
+
+        // 5-B. Input yoksa → networkidle bekle + tekrar teşhis
+        if (inputCount === 0) {
+          await this.logger.warning('[form] Input sayısı 0 — networkidle bekleniyor...')
+          try {
+            await this.page.waitForLoadState('networkidle', { timeout: 10000 })
+          } catch (_) {}
+          inputCount = await this._diagnoseDom('networkidle-sonrasi')
+        }
+
+        // 5-C. Hâlâ 0 → MutationObserver ile 20s DOM değişimini izle
+        if (inputCount === 0) {
+          await this.logger.warning('[form] Input hâlâ 0 — MutationObserver kuruldu (20s bekleniyor)...')
+          const appeared = await this._waitForInputViaMutation(20000)
+          if (appeared) {
+            inputCount = await this._diagnoseDom('mutation-sonrasi')
+            await this.logger.info('[form] ✓ Login formu sonradan render edildi (MutationObserver)')
+            await this.screenshot('01c_after_mutation')
+          } else {
+            // 5-D. 20 saniye geçti, hiç input yok → kesin teşhis + dump
+            await this.logger.error('[form] Sayfa hiç login formu üretmedi (20s MutationObserver süresi doldu)')
+            await this.screenshot(`form_never_rendered_${countrySlug}_attempt${attempt}`)
+
+            try {
+              const html     = await this.page.content()
+              const htmlPath = path.join(SCREENSHOT_DIR, `${Date.now()}_form_never_rendered_${countrySlug}.html`)
+              fs.writeFileSync(htmlPath, html, 'utf8')
+              await this.logger.info(`[form] HTML dump: ${htmlPath}`)
+            } catch (_) {}
+
+            if (attempt === 2) { this._loginFailed = true; return false }
+            continue
+          }
+        }
+
+        // 5-E. Input var → email selector ara
         foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
         if (foundEmailSel) {
           await this.logger.info(`[form] ✓ Email selector bulundu: "${foundEmailSel}"`)
         } else {
-          // 5-B. Bulunamadı → page.reload() + networkidle + tekrar ara
-          await this.logger.warning('[form] Email alanı bulunamadı — sayfa yenileniyor...')
+          // 5-F. Reload dene
+          await this.logger.warning('[form] Email selector bulunamadı — sayfa yenileniyor...')
           await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
           try {
             await this.page.waitForLoadState('networkidle', { timeout: 12000 })
           } catch (_) {}
-          // Reload sonrası cookie popup tekrar gelebilir
           const reloadCookie = await this._acceptCookies()
           if (reloadCookie.closed) {
             await this.logger.info(`[cookie] Reload sonrası çerez popup kapatıldı — "${reloadCookie.via}"`)
           }
           await this.page.waitForTimeout(2000)
           await this.screenshot('01b_after_reload')
+          inputCount = await this._diagnoseDom('reload-sonrasi')
 
           foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
           if (foundEmailSel) {
             await this.logger.info(`[form] ✓ Reload sonrası email selector bulundu: "${foundEmailSel}"`)
           } else {
-            // 5-C. Hâlâ yok → screenshot + HTML dump + tüm iframe'leri logla ve tara
-            await this.logger.warning('[form] Ana DOM\'da form bulunamadı — screenshot + HTML dump + iframe tarama...')
+            // 5-G. Hâlâ yok → iframe tara + kesin teşhis
+            await this.logger.warning('[form] Reload sonrası da bulunamadı — iframe taranıyor...')
             await this.screenshot(`form_not_found_${countrySlug}_attempt${attempt}`)
 
             try {
               const html     = await this.page.content()
               const htmlPath = path.join(SCREENSHOT_DIR, `${Date.now()}_form_notfound_${countrySlug}.html`)
               fs.writeFileSync(htmlPath, html, 'utf8')
-              await this.logger.info(`[form] HTML dump kaydedildi: ${htmlPath}`)
+              await this.logger.info(`[form] HTML dump: ${htmlPath}`)
             } catch (_) {}
 
-            // Tüm iframe URL'lerini logla
             const frames = this.page.frames()
             await this.logger.info(`[form] Toplam frame sayısı: ${frames.length}`)
 
@@ -410,14 +525,12 @@ class VfsPlaywrightClient {
               await this.logger.info(`[frame] URL: ${fUrl || '(boş)'}`)
               if (!fUrl || fUrl === 'about:blank') continue
 
-              // Bu frame'de cookie popup da olabilir
               const frameCookie = await this._clickCookieInContext(frame)
               if (frameCookie) {
-                await this.logger.info(`[cookie] iframe'de çerez popup kapatıldı: "${frameCookie}" — ${fUrl}`)
+                await this.logger.info(`[cookie] iframe çerez kapatıldı: "${frameCookie}" — ${fUrl}`)
                 await this.page.waitForTimeout(2000)
               }
 
-              // Email ara
               const fEmail = await this._findSelector(EMAIL_SELECTOR_LIST, frame)
               if (fEmail) {
                 await this.logger.info(`[frame] ✓ Email selector bulundu: "${fEmail}" — frame: ${fUrl}`)
@@ -428,7 +541,10 @@ class VfsPlaywrightClient {
             }
 
             if (!foundEmailSel) {
-              await this.logger.error('[form] Hiçbir frame\'de login formu bulunamadı.')
+              const diagnosis = inputCount > 0
+                ? `[form] Login formu render edildi (${inputCount} input) ama email selector eşleşmedi — selector listesi güncellenmeli`
+                : `[form] Sayfa hiç login formu üretmedi — VFS API engeli veya render hatası`
+              await this.logger.error(diagnosis)
               if (attempt === 2) { this._loginFailed = true; return false }
               continue
             }
