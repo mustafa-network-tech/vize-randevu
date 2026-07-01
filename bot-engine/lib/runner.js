@@ -230,9 +230,10 @@ async function runCycle() {
 
   if (error) { console.error(`\x1b[31m[runner] Bot listesi alınamadı:\x1b[0m`, error.message); return }
   if (!bots || bots.length === 0) {
-    process.stdout.write(`\r\x1b[2m[${new Date().toLocaleTimeString('tr-TR')}] Çalışan bot yok — bekleniyor...\x1b[0m`)
+    process.stdout.write(`\r\x1b[2m[${new Date().toLocaleTimeString('tr-TR')}] Running bot yok — bekleniyor...\x1b[0m`)
     return
   }
+
 
   // İlk döngüde aktif botların ülke adlarını göster (debug)
   if (_firstCycle) {
