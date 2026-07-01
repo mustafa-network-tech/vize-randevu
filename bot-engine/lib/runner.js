@@ -1,16 +1,18 @@
 const { getSupabase }           = require('./supabase')
 const { VfsPlaywrightClient }   = require('./vfs-playwright-client')
 const { createLogger }          = require('./logger')
+const { bumpMetric }            = require('./metrics')
 const { notifyAppointmentFound, notifyBotError, notifyBotStopped, sendTelegram } = require('./notifier')
 
 const MAX_CONSECUTIVE_ERRORS = 5
 const runningBots = new Set()
 
-// IP engeli yaşayan botlar ve ne zaman tekrar denenebileceği
-// { botId: timestamp }
-const ipBlockedUntil = new Map()
-
 const C = { cyan: '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', dim: '\x1b[2m', reset: '\x1b[0m' }
+
+/** Şu an işleme alınan bot sayısı (heartbeat için) */
+function getRunningCount() {
+  return runningBots.size
+}
 
 async function runBot(bot) {
   if (runningBots.has(bot.id)) return
@@ -18,14 +20,6 @@ async function runBot(bot) {
   const supabase = getSupabase()
   const logger   = createLogger(bot.id, bot.name)
   const account  = bot.visa_accounts
-
-  // IP engeli kontrolü
-  const blockedUntil = ipBlockedUntil.get(bot.id)
-  if (blockedUntil && Date.now() < blockedUntil) {
-    const remainMin = Math.ceil((blockedUntil - Date.now()) / 60000)
-    console.log(`\x1b[2m[runner] ${bot.name} IP engeli nedeniyle ${remainMin} dk daha bekliyor...\x1b[0m`)
-    return
-  }
 
   runningBots.add(bot.id)
 
@@ -61,20 +55,44 @@ async function runBot(bot) {
     await logger.info(`VFS giriş deneniyor: ${account?.email ?? '?'}`)
     const slots = await client.checkSlots()
 
-    // IP engeli tespit edildi → botu 65 dakika askıya al
+    // ── 3. Login / IP engeli / genel hata metrikleri ───
+    if (client._loginFailed) {
+      await bumpMetric(bot.id, 'login_fail')
+      await logger.warning('Login başarısız — metrik kaydedildi.')
+    }
+
     if (client._ipBlocked) {
-      const unblockAt = Date.now() + 65 * 60 * 1000
-      ipBlockedUntil.set(bot.id, unblockAt)
-      const unblockTime = new Date(unblockAt).toLocaleTimeString('tr-TR')
+      await bumpMetric(bot.id, 'ip_blocks')
+      const unblockAt     = Date.now() + 65 * 60 * 1000
+      const unblockTime   = new Date(unblockAt).toLocaleTimeString('tr-TR')
+      const nextRetryAtIso = new Date(unblockAt).toISOString()
+
       console.log(`${C.red}[runner] ${bot.name} IP engeli — ${unblockTime}'e kadar askıya alındı.${C.reset}`)
       await logger.warning(`IP engeli: bot ${unblockTime}'e kadar duraklatıldı. Proxy kullanmanız önerilir.`)
-      await supabase.from('bots').update({ status: 'paused' }).eq('id', bot.id)
+
+      await supabase.from('bots').update({
+        status: 'paused',
+        next_retry_at: nextRetryAtIso,
+      }).eq('id', bot.id)
+
       runningBots.delete(bot.id)
       await client.close()
       return
     }
 
-    // ── 3. Sonuç ───────────────────────────────────────
+    if (client._loginSuccess) {
+      await bumpMetric(bot.id, 'login_success')
+    }
+
+    if (client._slotCheckSuccess) {
+      await bumpMetric(bot.id, 'slot_checks')
+    }
+
+    if (client._captchaEncountered) {
+      await bumpMetric(bot.id, 'captcha_events')
+    }
+
+    // ── 4. Randevu bulunamadı ──────────────────────────
     if (slots.length === 0) {
       await logger.info('Randevu bulunamadı — bir sonraki döngüde tekrar denenecek.')
       runningBots.delete(bot.id)
@@ -82,9 +100,11 @@ async function runBot(bot) {
       return
     }
 
+    // ── 5. Randevu bulundu ─────────────────────────────
+    await bumpMetric(bot.id, 'appointments_found')
     await logger.success(`${slots.length} randevu slotu bulundu! İşleme alınıyor...`)
 
-    // ── 4. DB'ye kaydet ────────────────────────────────
+    // ── 6. DB'ye kaydet ────────────────────────────────
     const rows = slots.map(slot => ({
       bot_id:           bot.id,
       country:          account?.country ?? 'Bilinmiyor',
@@ -109,7 +129,7 @@ async function runBot(bot) {
       await logger.success(`${rows.length} randevu appointments tablosuna kaydedildi.`)
     }
 
-    // ── 5. Bildirim ────────────────────────────────────
+    // ── 7. Bildirim ────────────────────────────────────
     for (const slot of slots) {
       await notifyAppointmentFound(
         bot.user_id, bot.name, account?.country,
@@ -117,7 +137,7 @@ async function runBot(bot) {
       )
     }
 
-    // ── 6. Otomatik rezervasyon ────────────────────────
+    // ── 8. Otomatik rezervasyon ────────────────────────
     if (bot.auto_book) {
       await logger.info('Otomatik rezervasyon etkin — başvuran bilgileri sorgulanıyor...')
       const { data: applicants, error: appErr } = await supabase
@@ -185,6 +205,24 @@ let _firstCycle = true
 
 async function runCycle() {
   const supabase = getSupabase()
+
+  // ── IP engeli süresi dolan duraklatılmış botları otomatik devam ettir ──────
+  const nowIso = new Date().toISOString()
+  const { data: resumable } = await supabase
+    .from('bots')
+    .select('id, name')
+    .eq('status', 'paused')
+    .not('next_retry_at', 'is', null)
+    .lte('next_retry_at', nowIso)
+
+  if (resumable && resumable.length > 0) {
+    for (const b of resumable) {
+      console.log(`${C.green}[runner] ${b.name} IP engeli süresi doldu → tekrar çalışıyor${C.reset}`)
+      await supabase.from('bots').update({ status: 'running', next_retry_at: null }).eq('id', b.id)
+    }
+  }
+
+  // ── Çalışan botları getir ─────────────────────────────────────────────────
   const { data: bots, error } = await supabase
     .from('bots')
     .select('*, visa_accounts(email, encrypted_password, country, city, visa_center, visa_type, provider)')
@@ -218,11 +256,9 @@ async function runCycle() {
 
   console.log(`\n\x1b[2m[runner] ${pending.length} bot sırayla çalıştırılacak (IP engeli önlemi)\x1b[0m`)
 
-  // Botları sıralı çalıştır — aynı anda tek bot VFS'ye bağlansın
   for (let i = 0; i < pending.length; i++) {
     const bot = pending[i]
     await runBot(bot)
-    // Son bot değilse araya 5–10 saniye bekle (rate limiting önlemi)
     if (i < pending.length - 1) {
       const wait = 5000 + Math.floor(Math.random() * 5000)
       console.log(`\x1b[2m[runner] Sonraki bot için ${(wait / 1000).toFixed(1)}s bekleniyor...\x1b[0m`)
@@ -231,4 +267,4 @@ async function runCycle() {
   }
 }
 
-module.exports = { runCycle, runBot }
+module.exports = { runCycle, runBot, getRunningCount }

@@ -1,7 +1,7 @@
 require('dotenv').config()
 
-const { runCycle } = require('./lib/runner')
-const heartbeat    = require('./lib/heartbeat')
+const { runCycle, getRunningCount } = require('./lib/runner')
+const heartbeat                     = require('./lib/heartbeat')
 
 const POLL_INTERVAL_MS = parseInt(process.env.ENGINE_POLL_INTERVAL_MS ?? '5000')
 
@@ -14,12 +14,10 @@ console.log(`Başlatılıyor...`)
 console.log('─'.repeat(45))
 
 let isRunning = false
-let cycleCount = 0
 
 async function tick() {
   if (isRunning) return
   isRunning = true
-  cycleCount++
   try {
     await runCycle()
   } catch (err) {
@@ -30,16 +28,14 @@ async function tick() {
 }
 
 async function main() {
-  // Heartbeat başlat
-  await heartbeat.start()
+  // Heartbeat başlat — runner'daki çalışan bot sayısını ilet
+  await heartbeat.start(getRunningCount)
 
   // İlk turu hemen başlat
   tick()
 
-  // Periyodik çalışma
   const timer = setInterval(tick, POLL_INTERVAL_MS)
 
-  // Temiz kapatma
   async function shutdown(signal) {
     console.log(`\n[engine] ${signal} alındı — kapatılıyor...`)
     clearInterval(timer)

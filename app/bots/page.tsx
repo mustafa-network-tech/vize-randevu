@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/helpers/cn'
-import { Plus, Play, Square, RefreshCw, Database, Clock, X, Loader2, Zap, AlertTriangle } from 'lucide-react'
+import { Plus, Play, Square, RefreshCw, Database, Clock, X, Loader2, Zap, AlertTriangle, ShieldAlert, LogIn, CheckCircle2, CalendarCheck } from 'lucide-react'
 
 type Bot = {
   id: string
@@ -17,8 +17,40 @@ type Bot = {
   check_interval: number
   auto_book: boolean
   last_run: string | null
+  next_retry_at: string | null
   created_at: string
+  // Metrik kolonlar
+  login_success: number
+  login_fail: number
+  slot_checks: number
+  ip_blocks: number
+  appointments_found: number
   visa_accounts?: { email: string; country: string } | null
+}
+
+/** IP engeli geri sayım bileşeni */
+function IpBlockCountdown({ nextRetryAt }: { nextRetryAt: string }) {
+  const [remaining, setRemaining] = useState('')
+
+  useEffect(() => {
+    function calc() {
+      const ms = new Date(nextRetryAt).getTime() - Date.now()
+      if (ms <= 0) { setRemaining('—'); return }
+      const m = Math.floor(ms / 60000)
+      const s = Math.floor((ms % 60000) / 1000)
+      setRemaining(`${m}:${String(s).padStart(2, '0')}`)
+    }
+    calc()
+    const t = setInterval(calc, 1000)
+    return () => clearInterval(t)
+  }, [nextRetryAt])
+
+  return (
+    <div className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+      <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />
+      <span>IP engeli — <span className="font-mono font-bold">{remaining}</span> kaldı</span>
+    </div>
+  )
 }
 
 type VisaAccount = { id: string; email: string; country: string }
@@ -119,11 +151,11 @@ export default function BotsPage() {
   const fetchData = useCallback(async () => {
     const supabase = createClient()
     const [{ data: botsData }, { data: accData }, { data: engData }] = await Promise.all([
-      supabase.from('bots').select('*, visa_accounts(email, country)').order('created_at', { ascending: false }),
+      supabase.from('bots').select('*, visa_accounts(email, country)').order('created_at', { ascending: false }) as Promise<{ data: Bot[] | null }>,
       supabase.from('visa_accounts').select('id, email, country').eq('status', 'active'),
       supabase.from('engine_status').select('status, last_heartbeat').eq('id', 'bot-engine').maybeSingle(),
     ])
-    setBots((botsData ?? []) as Bot[])
+    setBots(botsData ?? [])
     setAccounts(accData ?? [])
     setEngineOnline(engData ? engineIsOnline(engData.last_heartbeat, engData.status) : false)
     setLoading(false)
@@ -241,11 +273,38 @@ export default function BotsPage() {
                   </div>
                 </div>
 
+                {/* IP engeli geri sayım */}
+                {bot.status === 'paused' && bot.next_retry_at && (
+                  <div className="mb-3">
+                    <IpBlockCountdown nextRetryAt={bot.next_retry_at} />
+                  </div>
+                )}
+
+                {/* Son çalışma */}
                 {bot.last_run && (
                   <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mb-3">
                     <Clock className="w-3 h-3" />Son: {new Date(bot.last_run).toLocaleString('tr-TR')}
                   </p>
                 )}
+
+                {/* Metrik satırı */}
+                <div className="grid grid-cols-3 gap-1.5 mb-3">
+                  <div className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/30 rounded-lg px-2 py-1">
+                    <LogIn className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{bot.login_success ?? 0}</span>
+                    <span className="text-xs text-slate-400 truncate">login</span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-blue-50 dark:bg-blue-950/30 rounded-lg px-2 py-1">
+                    <CheckCircle2 className="w-3 h-3 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{bot.slot_checks ?? 0}</span>
+                    <span className="text-xs text-slate-400 truncate">slot</span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-violet-50 dark:bg-violet-950/30 rounded-lg px-2 py-1">
+                    <CalendarCheck className="w-3 h-3 text-violet-600 dark:text-violet-400 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-violet-700 dark:text-violet-300">{bot.appointments_found ?? 0}</span>
+                    <span className="text-xs text-slate-400 truncate">randevu</span>
+                  </div>
+                </div>
 
                 <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                   {bot.status !== 'running' ? (

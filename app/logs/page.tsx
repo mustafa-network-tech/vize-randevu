@@ -17,10 +17,10 @@ type Log = {
 }
 
 const LEVEL_CFG = {
-  info:    { label: 'Info',    variant: 'info'    as const, icon: Info,          bg: '' },
-  success: { label: 'Başarı',  variant: 'success' as const, icon: CheckCircle2,  bg: 'bg-emerald-50/30 dark:bg-emerald-950/20' },
-  warning: { label: 'Uyarı',   variant: 'warning' as const, icon: AlertTriangle,  bg: 'bg-amber-50/30 dark:bg-amber-950/20' },
-  error:   { label: 'Hata',    variant: 'error'   as const, icon: AlertTriangle,  bg: 'bg-red-50/40 dark:bg-red-950/20' },
+  info:    { label: 'INFO',    variant: 'info'    as const, icon: Info,          bg: '',                                         border: 'border-l-2 border-l-blue-400'    },
+  success: { label: 'SUCCESS', variant: 'success' as const, icon: CheckCircle2,  bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', border: 'border-l-2 border-l-emerald-500'  },
+  warning: { label: 'WARNING', variant: 'warning' as const, icon: AlertTriangle, bg: 'bg-amber-50/50 dark:bg-amber-950/20',    border: 'border-l-2 border-l-amber-500'    },
+  error:   { label: 'ERROR',   variant: 'error'   as const, icon: AlertTriangle, bg: 'bg-red-50/50 dark:bg-red-950/20',        border: 'border-l-2 border-l-red-500'      },
 }
 
 export default function LogsPage() {
@@ -115,7 +115,7 @@ export default function LogsPage() {
                 {filtered.map(log => {
                   const lc = LEVEL_CFG[log.level] ?? LEVEL_CFG.info
                   return (
-                    <tr key={log.id} className={cn('transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50', lc.bg)}>
+                    <tr key={log.id} className={cn('transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50', lc.bg, lc.border)}>
                       <td className="py-3 px-4 text-xs font-mono text-slate-400 dark:text-slate-500 whitespace-nowrap">
                         <Clock className="w-3 h-3 inline mr-1" />
                         {new Date(log.created_at).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit' })}

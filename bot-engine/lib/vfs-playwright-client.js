@@ -27,6 +27,12 @@ class VfsPlaywrightClient {
     this.browser   = null
     this.page      = null
     this.loggedIn  = false
+    // Metrik flag'leri (runner.js tarafından okunur)
+    this._loginSuccess       = false
+    this._loginFailed        = false
+    this._ipBlocked          = false
+    this._slotCheckSuccess   = false
+    this._captchaEncountered = false
   }
 
   getVfsConfig() {
@@ -200,6 +206,7 @@ class VfsPlaywrightClient {
         afterLoginContent.includes('wrong')     ||
         afterLoginContent.includes('hatalı')
       )) {
+        this._loginFailed = true
         await this.logger.error('VFS girişi başarısız — e-posta veya şifre hatalı.')
         await this.screenshot('error_wrong_credentials')
         return false
@@ -213,7 +220,8 @@ class VfsPlaywrightClient {
         return false
       }
 
-      this.loggedIn = true
+      this.loggedIn      = true
+      this._loginSuccess = true
       await this.logger.success('VFS girişi başarılı.')
       return true
 
@@ -309,6 +317,7 @@ class VfsPlaywrightClient {
         return results
       })
 
+      this._slotCheckSuccess = true
       await this.logger.info(`Randevu kontrol tamamlandı — ${slots.length} slot bulundu.`)
 
       if (slots.length > 0) {
