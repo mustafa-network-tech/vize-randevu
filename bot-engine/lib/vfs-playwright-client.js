@@ -158,17 +158,90 @@ class VfsPlaywrightClient {
     // ── 1. Ana sayfa ─────────────────────────────────────
     await this.logger.info(`Ana sayfa açılıyor: ${cfg.home}`)
     await this.page.goto(cfg.home, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await this.page.waitForTimeout(2500)   // Angular init
+    await this.page.waitForTimeout(2500)
     await this.screenshot('00_home_page')
 
-    // ── 2. Çerez popup'ı ─────────────────────────────────
+    // ── 2. Ana sayfada çerez popup'ı ─────────────────────
     await this._acceptCookies()
 
     // ── 3. Login sayfasına geç ───────────────────────────
     await this.logger.info(`Login sayfasına geçiliyor: ${cfg.login}`)
     await this.page.goto(cfg.login, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await this.page.waitForTimeout(3000)   // Angular SPA render
+
+    // ── 4. Ağ tamamen yüklensin ───────────────────────────
+    try {
+      await this.page.waitForLoadState('networkidle', { timeout: 15000 })
+    } catch (_) {
+      await this.logger.warning('networkidle zaman aşımı — DOM taramasına devam ediliyor.')
+    }
+
+    // ── 5. Login sayfasında da çerez popup'ı olabilir ────
+    await this._acceptCookies()
+
+    // ── 6. Angular/SPA render için ek bekleme ────────────
+    await this.page.waitForTimeout(3000 + Math.floor(Math.random() * 2000))  // 3-5s
     await this.screenshot('01_login_page')
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tüm iframe'leri tarayarak giriş formunu arar, bulduklarını loglar
+  // ─────────────────────────────────────────────────────────────────────────
+  async _searchIframesForLoginForm() {
+    await this.logger.info('[iframe] Ana DOM\'da form bulunamadı — iframe\'ler taranıyor...')
+    const frames = this.page.frames()
+    await this.logger.info(`[iframe] Toplam frame sayısı: ${frames.length}`)
+
+    const IFRAME_SELECTORS = [
+      'input[type="email"]',
+      'input[type="password"]',
+      'input[name="email"]',
+      'input[name="password"]',
+      'input[name="username"]',
+      'input[formcontrolname="username"]',
+      'input[formcontrolname="password"]',
+      'input[id*="email"]',
+      'input[id*="password"]',
+    ]
+
+    let foundFrame = null
+    let foundEmailSel = null
+    let foundPasswordSel = null
+
+    for (const frame of frames) {
+      const frameUrl = frame.url()
+      if (frameUrl === 'about:blank' || frameUrl === '') continue
+
+      await this.logger.info(`[iframe] Frame inceleniyor: ${frameUrl}`)
+
+      const found = []
+      for (const sel of IFRAME_SELECTORS) {
+        try {
+          const el = await frame.$(sel)
+          if (el) {
+            found.push(sel)
+            await this.logger.info(`[iframe]   ✓ Bulundu: "${sel}" — frame: ${frameUrl}`)
+          }
+        } catch (_) {}
+      }
+
+      if (found.length > 0) {
+        // Email ve password selector'larını ayır
+        const emailSel = found.find(s =>
+          s.includes('email') || s.includes('username') || s.includes('"email"')
+        ) ?? null
+        const pwSel = found.find(s => s.includes('password')) ?? null
+
+        if (emailSel || pwSel) {
+          foundFrame     = frame
+          foundEmailSel  = emailSel
+          foundPasswordSel = pwSel
+          await this.logger.info(`[iframe] ✅ Giriş formu bulundu — frame: ${frameUrl}`)
+          break
+        }
+      }
+    }
+
+    return { frame: foundFrame, emailSel: foundEmailSel, passwordSel: foundPasswordSel }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -260,33 +333,72 @@ class VfsPlaywrightClient {
 
         // ── 4. Form bekleniyor ────────────────────────────
         await this.logger.info('Login formu bekleniyor...')
-        try {
-          await this.page.waitForSelector(EMAIL_SELECTORS, { timeout: 15000 })
-        } catch (err) {
-          // Timeout'ta da session expired bakılsın
-          const content2 = await this.page.content().catch(() => '')
-          if (isSessionExpired(this.page.url(), await this.page.title().catch(() => ''), content2)) {
-            await this.screenshot(`session_expired_form_attempt${attempt}`)
-            if (attempt === 2) {
-              await this.logger.error('[session] Session Expired: form bulunamadı, 2. deneme de başarısız.')
-              this._loginFailed = true
-              return false
+        let useFrame = null       // null → ana sayfa, Frame → iframe içinde
+        let emailSel  = EMAIL_SELECTORS
+        let pwSel     = PASSWORD_SELECTORS
+        let submitSel = SUBMIT_SELECTORS
+
+        const formFoundInMain = await this.page.$(EMAIL_SELECTORS).then(el => !!el).catch(() => false)
+
+        if (!formFoundInMain) {
+          // Ana DOM'da form yok — networkidle + ek bekleme + tekrar dene
+          await this.logger.info('Form henüz yüklenmedi, ek 3s bekleniyor ve DOM yeniden taranıyor...')
+          await this.page.waitForTimeout(3000)
+
+          const formFoundAfterWait = await this.page.$(EMAIL_SELECTORS).then(el => !!el).catch(() => false)
+
+          if (!formFoundAfterWait) {
+            // Session expired kontrolü
+            const content2 = await this.page.content().catch(() => '')
+            if (isSessionExpired(this.page.url(), await this.page.title().catch(() => ''), content2)) {
+              await this.screenshot(`session_expired_form_attempt${attempt}`)
+              if (attempt === 2) {
+                await this.logger.error('[session] Session Expired: form bulunamadı, 2. deneme de başarısız.')
+                this._loginFailed = true
+                return false
+              }
+              continue
             }
-            continue
+
+            // iframe taraması
+            const iframeResult = await this._searchIframesForLoginForm()
+            if (iframeResult.frame && (iframeResult.emailSel || iframeResult.passwordSel)) {
+              useFrame  = iframeResult.frame
+              emailSel  = iframeResult.emailSel  ?? EMAIL_SELECTORS
+              pwSel     = iframeResult.passwordSel ?? PASSWORD_SELECTORS
+              await this.logger.info('[iframe] Form iframe içinde bulundu — iframe bağlamında devam ediliyor.')
+            } else {
+              // Hiçbir yerde bulunamadı → dump al + hata fırlat
+              await this.logger.error('Login formu hiçbir yerde bulunamadı — debug dump alınıyor...')
+              await captureDump(this.page, `login_form_notfound_${countrySlug}_attempt${attempt}`, this._consoleErrors, this._networkResponses, EMAIL_SELECTORS.split(', '))
+              if (attempt === 2) {
+                this._loginFailed = true
+                return false
+              }
+              continue  // 1. denemede retry
+            }
           }
-          await this.logger.error('Login formu yüklenemedi — debug dump alınıyor...')
-          await captureDump(this.page, `login_form_timeout_${countrySlug}`, this._consoleErrors, this._networkResponses, EMAIL_SELECTORS.split(', '))
-          throw err
         }
 
         // ── 5. Form doldur ve giriş yap ───────────────────
         await this.logger.info('E-posta ve şifre dolduruluyor...')
-        await this.humanType(EMAIL_SELECTORS,    this.account.email)
-        await this.humanType(PASSWORD_SELECTORS, this.account.encrypted_password)
+        if (useFrame) {
+          // iframe bağlamında doldur
+          await useFrame.fill(emailSel, this.account.email)
+          await this.page.waitForTimeout(300 + Math.random() * 300)
+          await useFrame.fill(pwSel, this.account.encrypted_password)
+        } else {
+          await this.humanType(emailSel, this.account.email)
+          await this.humanType(pwSel,    this.account.encrypted_password)
+        }
         await this.screenshot('02_login_filled')
 
         await this.logger.info('Giriş butonuna tıklanıyor...')
-        await this.page.click(SUBMIT_SELECTORS)
+        if (useFrame) {
+          await useFrame.click(submitSel).catch(() => {})
+        } else {
+          await this.page.click(submitSel)
+        }
         await this.page.waitForLoadState('networkidle', { timeout: 25000 })
         await this.page.waitForTimeout(2000)
         await this.screenshot('03_after_login')

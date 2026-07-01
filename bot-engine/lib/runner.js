@@ -184,13 +184,13 @@ async function runBot(bot) {
     console.error(`${C.red}[runner] ❌ Kritik hata:${C.reset}`, err.message)
     await logger.error(`Kritik hata: ${err.message}`)
     await notifyBotError(bot.user_id, bot.name, err.message)
+    await bumpMetric(bot.id, 'login_fail')
 
-    const { data: currentBot } = await supabase.from('bots').select('error_count').eq('id', bot.id).single()
-    const errorCount = (currentBot?.error_count ?? 0) + 1
-    await supabase.from('bots').update({ error_count: errorCount }).eq('id', bot.id)
-
-    if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
-      await supabase.from('bots').update({ status: 'error', error_count: 0 }).eq('id', bot.id)
+    // Ardışık hata sayacı — login_fail toplamına bak
+    const { data: botData } = await supabase.from('bots').select('login_fail').eq('id', bot.id).single()
+    const totalFails = botData?.login_fail ?? 0
+    if (totalFails >= MAX_CONSECUTIVE_ERRORS) {
+      await supabase.from('bots').update({ status: 'error' }).eq('id', bot.id)
       await notifyBotStopped(bot.user_id, bot.name, `${MAX_CONSECUTIVE_ERRORS} ardı ardına hata — bot durduruldu.`)
       await logger.error(`Bot ${MAX_CONSECUTIVE_ERRORS} hata sonrası durduruldu.`)
     }
