@@ -1,6 +1,7 @@
 require('dotenv').config()
 
 const { runCycle } = require('./lib/runner')
+const heartbeat    = require('./lib/heartbeat')
 
 const POLL_INTERVAL_MS = parseInt(process.env.ENGINE_POLL_INTERVAL_MS ?? '5000')
 
@@ -28,18 +29,29 @@ async function tick() {
   }
 }
 
-// İlk turu hemen başlat
-tick()
+async function main() {
+  // Heartbeat başlat
+  await heartbeat.start()
 
-// Periyodik çalışma
-const timer = setInterval(tick, POLL_INTERVAL_MS)
+  // İlk turu hemen başlat
+  tick()
 
-// Temiz kapatma
-process.on('SIGINT',  () => shutdown('SIGINT'))
-process.on('SIGTERM', () => shutdown('SIGTERM'))
+  // Periyodik çalışma
+  const timer = setInterval(tick, POLL_INTERVAL_MS)
 
-function shutdown(signal) {
-  console.log(`\n[engine] ${signal} alındı — kapatılıyor...`)
-  clearInterval(timer)
-  process.exit(0)
+  // Temiz kapatma
+  async function shutdown(signal) {
+    console.log(`\n[engine] ${signal} alındı — kapatılıyor...`)
+    clearInterval(timer)
+    await heartbeat.stop()
+    process.exit(0)
+  }
+
+  process.on('SIGINT',  () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
 }
+
+main().catch(err => {
+  console.error('[engine] Başlatma hatası:', err.message)
+  process.exit(1)
+})

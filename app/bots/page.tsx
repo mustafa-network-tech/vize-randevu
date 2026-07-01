@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/helpers/cn'
-import { Plus, Play, Square, RefreshCw, Database, Clock, X, Loader2, Zap } from 'lucide-react'
+import { Plus, Play, Square, RefreshCw, Database, Clock, X, Loader2, Zap, AlertTriangle } from 'lucide-react'
 
 type Bot = {
   id: string
@@ -101,24 +101,39 @@ function AddBotModal({ accounts, onClose, onAdded }: { accounts: VisaAccount[]; 
   )
 }
 
+const OFFLINE_THRESHOLD_MS = 75_000  // 75 saniye
+
+function engineIsOnline(lastHeartbeat: string | null, engineDbStatus: string | null): boolean {
+  if (engineDbStatus !== 'online') return false
+  if (!lastHeartbeat) return false
+  return (Date.now() - new Date(lastHeartbeat).getTime()) < OFFLINE_THRESHOLD_MS
+}
+
 export default function BotsPage() {
   const [bots,     setBots]     = useState<Bot[]>([])
   const [accounts, setAccounts] = useState<VisaAccount[]>([])
   const [loading,  setLoading]  = useState(true)
   const [showModal,setShowModal]= useState(false)
+  const [engineOnline, setEngineOnline] = useState<boolean | null>(null)
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: botsData }, { data: accData }] = await Promise.all([
+    const [{ data: botsData }, { data: accData }, { data: engData }] = await Promise.all([
       supabase.from('bots').select('*, visa_accounts(email, country)').order('created_at', { ascending: false }),
       supabase.from('visa_accounts').select('id, email, country').eq('status', 'active'),
+      supabase.from('engine_status').select('status, last_heartbeat').eq('id', 'bot-engine').maybeSingle(),
     ])
     setBots((botsData ?? []) as Bot[])
     setAccounts(accData ?? [])
+    setEngineOnline(engData ? engineIsOnline(engData.last_heartbeat, engData.status) : false)
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    fetchData()
+    const interval = setInterval(fetchData, 30_000)
+    return () => clearInterval(interval)
+  }, [fetchData])
 
   const setStatus = async (id: string, status: Bot['status']) => {
     const supabase = createClient()
@@ -138,6 +153,19 @@ export default function BotsPage() {
   return (
     <div className="space-y-6">
       {showModal && <AddBotModal accounts={accounts} onClose={() => setShowModal(false)} onAdded={fetchData} />}
+
+      {/* Engine offline uyarısı */}
+      {engineOnline === false && (
+        <div className="flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+          <div>
+            <span className="font-semibold text-amber-700 dark:text-amber-300">Bot Engine Çevrimdışı</span>
+            <span className="ml-2 text-amber-600 dark:text-amber-400 text-xs">
+              — Botlar &quot;çalışıyor&quot; görünse bile gerçekte çalışmıyor olabilir. Bot engine&apos;i başlatın.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* KPI */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

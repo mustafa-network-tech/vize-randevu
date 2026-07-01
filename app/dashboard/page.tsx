@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Badge } from '@/components/ui/Badge'
 import { cn } from '@/lib/helpers/cn'
-import { Bot, CalendarCheck, Users, Bell, TrendingUp, Clock, Activity, Database } from 'lucide-react'
+import { Bot, CalendarCheck, Users, Bell, TrendingUp, Clock, Activity, Database, Cpu } from 'lucide-react'
 import Link from 'next/link'
 
 interface Stats {
@@ -15,6 +15,13 @@ interface Stats {
   availableAppointments: number
   bookedAppointments: number
   unreadNotifications: number
+}
+
+interface EngineStatus {
+  status: 'online' | 'offline'
+  last_heartbeat: string | null
+  started_at: string | null
+  version: string | null
 }
 
 interface RecentLog {
@@ -87,8 +94,49 @@ function EmptyDashboard() {
   )
 }
 
+// Engine son heartbeat'ten bu yana kaç saniye geçti
+function secondsSince(isoStr: string | null): number {
+  if (!isoStr) return Infinity
+  return (Date.now() - new Date(isoStr).getTime()) / 1000
+}
+
+// Heartbeat 75 saniyeden eskiyse offline say (2 beat kaçırma toleransı + 15s buffer)
+const OFFLINE_THRESHOLD_S = 75
+
+function EngineStatusBanner({ engine }: { engine: EngineStatus | null }) {
+  const isOnline = engine?.status === 'online' && secondsSince(engine.last_heartbeat) < OFFLINE_THRESHOLD_S
+  const lastBeat = engine?.last_heartbeat ? new Date(engine.last_heartbeat) : null
+
+  return (
+    <div className={cn(
+      'flex items-center gap-3 rounded-xl border px-4 py-3 text-sm',
+      isOnline
+        ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800'
+        : 'bg-red-50 border-red-200 dark:bg-red-950/40 dark:border-red-800'
+    )}>
+      <Cpu className={cn('w-4 h-4 flex-shrink-0', isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500')} />
+      <div className="flex-1 min-w-0">
+        <span className={cn('font-semibold', isOnline ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400')}>
+          Bot Engine {isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}
+        </span>
+        {lastBeat && (
+          <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+            Son heartbeat: {lastBeat.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {' '}({Math.round(secondsSince(engine!.last_heartbeat))}s önce)
+          </span>
+        )}
+        {!engine && (
+          <span className="ml-2 text-xs text-slate-400">— engine_status tablosu bulunamadı</span>
+        )}
+      </div>
+      <div className={cn('w-2 h-2 rounded-full flex-shrink-0', isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-400')} />
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
+  const [engine, setEngine] = useState<EngineStatus | null>(null)
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
   const [recentAppts, setRecentAppts] = useState<RecentAppointment[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,6 +151,7 @@ export default function DashboardPage() {
         { count: unreadCount },
         { data: logs },
         { data: appts },
+        { data: engineData },
       ] = await Promise.all([
         supabase.from('visa_accounts').select('*', { count: 'exact', head: true }),
         supabase.from('bots').select('status'),
@@ -110,8 +159,10 @@ export default function DashboardPage() {
         supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('is_read', false),
         supabase.from('bot_logs').select('id, level, message, created_at, bots(name)').order('created_at', { ascending: false }).limit(8),
         supabase.from('appointments').select('id, country, city, visa_type, appointment_date, appointment_time, status, created_at').order('created_at', { ascending: false }).limit(5),
+        supabase.from('engine_status').select('status, last_heartbeat, started_at, version').eq('id', 'bot-engine').maybeSingle(),
       ])
 
+      setEngine((engineData as EngineStatus | null) ?? null)
       setStats({
         totalAccounts: totalAccounts ?? 0,
         activeBots:    (bots ?? []).filter(b => b.status !== 'error').length,
@@ -125,7 +176,11 @@ export default function DashboardPage() {
       setRecentAppts((appts ?? []) as unknown as RecentAppointment[])
       setLoading(false)
     }
+
     fetchAll()
+    // Engine durumunu her 30s yenile
+    const interval = setInterval(fetchAll, 30_000)
+    return () => clearInterval(interval)
   }, [])
 
   if (loading) {
@@ -144,6 +199,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Engine durum banner */}
+      <EngineStatusBanner engine={engine} />
+
       {/* KPI kartlar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard icon={Users}         label="VFS Hesap"        value={stats.totalAccounts}            sub="Toplam kayıtlı hesap"     color="bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400"         href="/accounts" />
