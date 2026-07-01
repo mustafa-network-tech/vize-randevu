@@ -24,21 +24,30 @@ if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: tr
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
-// Cookie popup butonları — sırayla denenir
-const COOKIE_SELECTORS = [
+// Cookie popup buton metinleri — öncelik sırasıyla
+const COOKIE_BUTTON_TEXTS = [
+  'Tüm Tanımlama Bilgilerini Kabul Et',
+  'Accept All Cookies',
+  'Accept All',
+  'Accept Cookies',
+  'Accept',
+  'I Accept',
+  'Agree',
+  'Kabul Et',
+  'Kabul',
+  'Tümünü Reddet',
+  'Reject All',
+]
+
+// CSS selector tabanlı cookie düğmeleri (metin eşleşmesi yoksa fallback)
+const COOKIE_CSS_SELECTORS = [
   '#onetrust-accept-btn-handler',
-  'button[id*="accept"]',
-  'button[class*="accept"]',
+  '#onetrust-reject-all-handler',
+  'button[id*="accept-all"]',
+  'button[id*="acceptAll"]',
+  'button[class*="accept-all"]',
   'button[aria-label*="Accept All"]',
   'button[aria-label*="Accept"]',
-  'button[aria-label*="Agree"]',
-  'button:has-text("Accept All Cookies")',
-  'button:has-text("Accept All")',
-  'button:has-text("Accept Cookies")',
-  'button:has-text("Accept")',
-  'button:has-text("I Accept")',
-  'button:has-text("Agree")',
-  'button:has-text("Kabul")',
   '.cookie-accept',
   '.accept-cookies',
 ]
@@ -134,21 +143,63 @@ class VfsPlaywrightClient {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Çerez / Cookie popup'ı otomatik kabul et
+  // Tek bir context (page veya frame) içinde cookie popup butonu ara ve tıkla
+  // Döner: tıklanan buton metni veya null
   // ─────────────────────────────────────────────────────────────────────────
-  async _acceptCookies() {
-    for (const sel of COOKIE_SELECTORS) {
+  async _clickCookieInContext(ctx) {
+    // 1. Metin tabanlı arama (öncelikli)
+    for (const text of COOKIE_BUTTON_TEXTS) {
       try {
-        const btn = await this.page.$(sel)
-        if (btn && await btn.isVisible()) {
+        const btn = await ctx.$(`button:has-text("${text}")`)
+        if (btn && await btn.isVisible().catch(() => false)) {
           await btn.click({ timeout: 3000 })
-          await this.page.waitForTimeout(800)
-          await this.logger.info('[cookie] Çerez onay popup\'ı kabul edildi.')
-          return true
+          return text
         }
       } catch (_) {}
     }
-    return false
+
+    // 2. CSS selector tabanlı fallback
+    for (const sel of COOKIE_CSS_SELECTORS) {
+      try {
+        const btn = await ctx.$(sel)
+        if (btn && await btn.isVisible().catch(() => false)) {
+          await btn.click({ timeout: 3000 })
+          return sel
+        }
+      } catch (_) {}
+    }
+
+    return null
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Cookie popup'ı kapat — ana sayfa + tüm iframe'ler taranır.
+  // Tıklamadan sonra 2 saniye bekler.
+  // Döner: { closed: boolean, via: string|null }
+  // ─────────────────────────────────────────────────────────────────────────
+  async _acceptCookies() {
+    // Önce ana sayfayı dene
+    const mainResult = await this._clickCookieInContext(this.page)
+    if (mainResult) {
+      await this.page.waitForTimeout(2000)
+      await this.logger.info(`[cookie] ✓ Çerez popup kapatıldı (ana sayfa) — "${mainResult}"`)
+      return { closed: true, via: mainResult }
+    }
+
+    // Sonra tüm iframe'leri tara
+    const frames = this.page.frames()
+    for (const frame of frames) {
+      const fUrl = frame.url()
+      if (!fUrl || fUrl === 'about:blank') continue
+      const frameResult = await this._clickCookieInContext(frame)
+      if (frameResult) {
+        await this.page.waitForTimeout(2000)
+        await this.logger.info(`[cookie] ✓ Çerez popup kapatıldı (iframe: ${fUrl}) — "${frameResult}"`)
+        return { closed: true, via: frameResult }
+      }
+    }
+
+    return { closed: false, via: null }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -162,21 +213,31 @@ class VfsPlaywrightClient {
     await this.screenshot('00_home_page')
 
     // ── 2. Ana sayfada çerez popup'ı ─────────────────────
-    await this._acceptCookies()
+    const homeCookie = await this._acceptCookies()
+    if (!homeCookie.closed) {
+      await this.logger.info('[cookie] Ana sayfada çerez popup tespit edilmedi.')
+    }
 
     // ── 3. Login sayfasına geç ───────────────────────────
     await this.logger.info(`Login sayfasına geçiliyor: ${cfg.login}`)
     await this.page.goto(cfg.login, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    // ── 4. Ağ tamamen yüklensin ───────────────────────────
+    // ── 4. networkidle ───────────────────────────────────
     try {
       await this.page.waitForLoadState('networkidle', { timeout: 15000 })
     } catch (_) {
-      await this.logger.warning('networkidle zaman aşımı — DOM taramasına devam ediliyor.')
+      await this.logger.warning('[nav] networkidle zaman aşımı — DOM taramasına devam ediliyor.')
     }
 
-    // ── 5. Login sayfasında da çerez popup'ı olabilir ────
-    await this._acceptCookies()
+    // ── 5. Login sayfasındaki çerez popup'ı ─────────────
+    await this.logger.info('[cookie] Login sayfasında çerez popup aranıyor (ana sayfa + iframe)...')
+    const loginCookie = await this._acceptCookies()
+    if (loginCookie.closed) {
+      await this.logger.info(`[cookie] ✓ Çerez popup kapatıldı — "${loginCookie.via}"`)
+    } else {
+      await this.logger.warning('[cookie] Çerez popup bulunamadı veya zaten kapalı.')
+      await this.screenshot('01_cookie_not_found')
+    }
 
     // ── 6. Angular/SPA render için ek bekleme ────────────
     await this.page.waitForTimeout(3000 + Math.floor(Math.random() * 2000))  // 3-5s
@@ -287,7 +348,19 @@ class VfsPlaywrightClient {
           continue
         }
 
-        // ── 4. Form Tespiti ───────────────────────────────────
+        // ── 4. Cookie popup — login sayfası yüklendikten sonra ─
+        // (3s SPA bekleme _navigateToLogin'de zaten yapıldı)
+        // Eğer login sayfasında yeniden çıkmışsa yakala
+        await this.logger.info('[cookie] Login sayfası sonrası çerez popup kontrol ediliyor...')
+        const postNavCookie = await this._acceptCookies()
+        if (postNavCookie.closed) {
+          await this.logger.info(`[cookie] ✓ Çerez popup kapatıldı — "${postNavCookie.via}"`)
+          await this.page.waitForTimeout(1000)
+        } else {
+          await this.logger.info('[cookie] Çerez popup yok veya zaten kapatılmış.')
+        }
+
+        // ── 5. Form Tespiti ───────────────────────────────────
         await this.logger.info('[form] Login formu aranıyor...')
 
         let foundEmailSel  = null
@@ -295,49 +368,60 @@ class VfsPlaywrightClient {
         let foundSubmitSel = null
         let formFrame      = null   // null = ana sayfa, Frame = iframe
 
-        // 4-A. Ana DOM'da email ara
+        // 5-A. Ana DOM'da email ara
         foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
         if (foundEmailSel) {
-          await this.logger.info(`[form] ✓ Email alanı bulundu: "${foundEmailSel}"`)
+          await this.logger.info(`[form] ✓ Email selector bulundu: "${foundEmailSel}"`)
         } else {
-          // 4-B. Bulunamadı → page.reload() + networkidle + tekrar ara
-          await this.logger.info('[form] Email alanı bulunamadı — sayfa yenileniyor...')
+          // 5-B. Bulunamadı → page.reload() + networkidle + tekrar ara
+          await this.logger.warning('[form] Email alanı bulunamadı — sayfa yenileniyor...')
           await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
           try {
             await this.page.waitForLoadState('networkidle', { timeout: 12000 })
           } catch (_) {}
+          // Reload sonrası cookie popup tekrar gelebilir
+          const reloadCookie = await this._acceptCookies()
+          if (reloadCookie.closed) {
+            await this.logger.info(`[cookie] Reload sonrası çerez popup kapatıldı — "${reloadCookie.via}"`)
+          }
           await this.page.waitForTimeout(2000)
           await this.screenshot('01b_after_reload')
 
           foundEmailSel = await this._findSelector(EMAIL_SELECTOR_LIST)
           if (foundEmailSel) {
-            await this.logger.info(`[form] ✓ Reload sonrası email alanı bulundu: "${foundEmailSel}"`)
+            await this.logger.info(`[form] ✓ Reload sonrası email selector bulundu: "${foundEmailSel}"`)
           } else {
-            // 4-C. Hâlâ yok → screenshot + HTML dump + iframe tara
-            await this.logger.warning('[form] Ana DOM\'da form bulunamadı — screenshot + HTML + iframe taraması başlıyor...')
+            // 5-C. Hâlâ yok → screenshot + HTML dump + tüm iframe'leri logla ve tara
+            await this.logger.warning('[form] Ana DOM\'da form bulunamadı — screenshot + HTML dump + iframe tarama...')
             await this.screenshot(`form_not_found_${countrySlug}_attempt${attempt}`)
 
-            // HTML dump
             try {
               const html     = await this.page.content()
               const htmlPath = path.join(SCREENSHOT_DIR, `${Date.now()}_form_notfound_${countrySlug}.html`)
               fs.writeFileSync(htmlPath, html, 'utf8')
-              await this.logger.info(`[form] HTML dump: ${htmlPath}`)
+              await this.logger.info(`[form] HTML dump kaydedildi: ${htmlPath}`)
             } catch (_) {}
 
-            // Tüm iframe URL'lerini logla ve form ara
+            // Tüm iframe URL'lerini logla
             const frames = this.page.frames()
-            await this.logger.info(`[form] Toplam frame: ${frames.length}`)
+            await this.logger.info(`[form] Toplam frame sayısı: ${frames.length}`)
 
             for (const frame of frames) {
               const fUrl = frame.url()
               await this.logger.info(`[frame] URL: ${fUrl || '(boş)'}`)
               if (!fUrl || fUrl === 'about:blank') continue
 
-              // Bu frame'de email selector'ı ara
+              // Bu frame'de cookie popup da olabilir
+              const frameCookie = await this._clickCookieInContext(frame)
+              if (frameCookie) {
+                await this.logger.info(`[cookie] iframe'de çerez popup kapatıldı: "${frameCookie}" — ${fUrl}`)
+                await this.page.waitForTimeout(2000)
+              }
+
+              // Email ara
               const fEmail = await this._findSelector(EMAIL_SELECTOR_LIST, frame)
               if (fEmail) {
-                await this.logger.info(`[frame] ✓ Email alanı bulundu: "${fEmail}" — frame: ${fUrl}`)
+                await this.logger.info(`[frame] ✓ Email selector bulundu: "${fEmail}" — frame: ${fUrl}`)
                 foundEmailSel = fEmail
                 formFrame     = frame
                 break
@@ -352,15 +436,15 @@ class VfsPlaywrightClient {
           }
         }
 
-        // 4-D. Password selector'ı bul
+        // 5-D. Password selector'ı bul (aynı context'te)
         foundPwSel = await this._findSelector(PASSWORD_SELECTOR_LIST, formFrame)
         if (foundPwSel) {
-          await this.logger.info(`[form] ✓ Password alanı bulundu: "${foundPwSel}"`)
+          await this.logger.info(`[form] ✓ Password selector bulundu: "${foundPwSel}"`)
         } else {
           await this.logger.warning('[form] Password alanı bulunamadı — devam ediliyor.')
         }
 
-        // 4-E. Submit selector'ı bul
+        // 5-E. Submit selector'ı bul
         foundSubmitSel = await this._findSelector(SUBMIT_SELECTOR_LIST, formFrame)
         if (foundSubmitSel) {
           await this.logger.info(`[form] ✓ Submit butonu bulundu: "${foundSubmitSel}"`)
