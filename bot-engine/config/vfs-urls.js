@@ -194,4 +194,27 @@ function validateLoginPage(url, title) {
   return { valid: true, reason: 'OK' }
 }
 
-module.exports = { getVfsConfig, validateLoginPage, normalizeKey, VFS_COUNTRY_CONFIG }
+/**
+ * Sayfa içeriğinde "Session Expired or Invalid" olup olmadığını kontrol eder.
+ * URL, başlık veya HTML içeriğine bakılır.
+ */
+function isSessionExpired(url, title, content) {
+  const u = (url     ?? '').toLowerCase()
+  const t = (title   ?? '').toLowerCase()
+  const c = (content ?? '').toLowerCase()
+
+  return (
+    u.includes('session-expired') ||
+    u.includes('session_expired') ||
+    t.includes('session expired') ||
+    t.includes('session invalid') ||
+    c.includes('session expired or invalid') ||
+    c.includes('your session has expired') ||
+    c.includes('session has expired') ||
+    c.includes('invalid session') ||
+    c.includes('oturum süresi doldu') ||
+    c.includes('oturum geçersiz')
+  )
+}
+
+module.exports = { getVfsConfig, validateLoginPage, isSessionExpired, normalizeKey, VFS_COUNTRY_CONFIG }
